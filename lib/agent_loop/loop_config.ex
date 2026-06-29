@@ -16,6 +16,7 @@ defmodule AgentLoop.LoopConfig do
       )
   """
 
+  alias AgentLoop.MCP.Server, as: MCPServer
   alias AgentLoop.Persistence
   alias AgentLoop.Persistence.NoOp
   alias AgentLoop.ToolRegistry
@@ -37,7 +38,9 @@ defmodule AgentLoop.LoopConfig do
           deny_tools: [String.t()] | nil,
           persistence: Persistence.t(),
           trace: boolean(),
-          session_id: String.t() | nil
+          session_id: String.t() | nil,
+          mcp_servers: [MCPServer.t()],
+          mcp_clients: %{String.t() => any()}
         }
 
   defstruct provider: nil,
@@ -54,7 +57,9 @@ defmodule AgentLoop.LoopConfig do
             deny_tools: nil,
             persistence: {NoOp, nil},
             trace: false,
-            session_id: nil
+            session_id: nil,
+            mcp_servers: [],
+            mcp_clients: %{}
 
   @doc "Create a config with required fields."
   def new(provider, registry, opts \\ []) do
@@ -75,7 +80,9 @@ defmodule AgentLoop.LoopConfig do
       allow_tools: Keyword.get(opts, :allow_tools),
       deny_tools: Keyword.get(opts, :deny_tools),
       persistence: persistence,
-      trace: trace
+      trace: trace,
+      mcp_servers: Keyword.get(opts, :mcp_servers, []),
+      mcp_clients: Keyword.get(opts, :mcp_clients, %{})
     }
   end
 end

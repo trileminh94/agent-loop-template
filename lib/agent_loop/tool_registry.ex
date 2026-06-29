@@ -25,7 +25,12 @@ defmodule AgentLoop.ToolRegistry do
 
   @doc "Register a tool module under its `name/0`."
   def register(%__MODULE__{} = registry, tool_module) when is_atom(tool_module) do
-    name = tool_module.name()
+    register_as(registry, tool_module.name(), tool_module)
+  end
+
+  @doc "Register a tool module under a custom name."
+  def register_as(%__MODULE__{} = registry, name, tool_module)
+      when is_binary(name) and is_atom(tool_module) do
     %{registry | tools: Map.put(registry.tools, name, tool_module)}
   end
 
@@ -68,7 +73,7 @@ defmodule AgentLoop.ToolRegistry do
   end
 
   @doc "Execute a tool by name with the given arguments."
-  def execute(%__MODULE__{} = registry, tool_call_id, name, args)
+  def execute(%__MODULE__{} = registry, tool_call_id, name, args, context \\ nil)
       when is_binary(tool_call_id) and is_binary(name) and is_map(args) do
     case resolve(registry, name) do
       :error ->
@@ -76,7 +81,9 @@ defmodule AgentLoop.ToolRegistry do
 
       {:ok, tool_module, canonical_name} ->
         try do
-          case tool_module.execute(args) do
+          result = run_tool(tool_module, canonical_name, args, context)
+
+          case result do
             {:ok, content} ->
               ToolResult.ok(tool_call_id, canonical_name, content)
 
@@ -99,6 +106,14 @@ defmodule AgentLoop.ToolRegistry do
             )
         end
     end
+  end
+
+  defp run_tool(AgentLoop.Tools.MCP, canonical_name, args, context) do
+    AgentLoop.Tools.MCP.execute_prefixed(canonical_name, args, context)
+  end
+
+  defp run_tool(tool_module, _canonical_name, args, _context) do
+    tool_module.execute(args)
   end
 
   @doc "Strip a configured prefix from a tool-call name returned by the model."

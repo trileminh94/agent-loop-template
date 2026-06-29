@@ -10,12 +10,16 @@ defmodule AgentLoop.Loop do
   alias AgentLoop.Event
   alias AgentLoop.LoopConfig
   alias AgentLoop.LoopState
+  alias AgentLoop.MCP.Client, as: MCPClient
+  alias AgentLoop.MCP.Server, as: MCPServer
+  alias AgentLoop.MCP.ToolBridge
   alias AgentLoop.Message
   alias AgentLoop.RunRequest
   alias AgentLoop.RunResult
   alias AgentLoop.ToolCall
   alias AgentLoop.ToolRegistry
   alias AgentLoop.Tools.Context
+  alias AgentLoop.Tools.MCP, as: MCPTool
 
   @doc "Run the agent loop."
   def run(%RunRequest{} = request, %LoopConfig{} = config) do
@@ -53,27 +57,79 @@ defmodule AgentLoop.Loop do
         end
       end)
 
-    emit(config, :run_started, %{message: request.message})
+    {mcp_clients, config} = start_mcp(config)
 
-    result = iterate(state, config)
+    try do
+      emit(config, :run_started, %{message: request.message})
 
-    if request.session_id do
-      adapter.save_session(
-        persistence_state,
-        request.session_id,
-        result.messages,
-        session_metadata(request, result)
-      )
+      result = iterate(state, config)
+
+      if request.session_id do
+        adapter.save_session(
+          persistence_state,
+          request.session_id,
+          result.messages,
+          session_metadata(request, result)
+        )
+      end
+
+      emit(config, :run_completed, %{
+        content: result.content,
+        iterations: result.iterations,
+        total_tool_calls: result.total_tool_calls,
+        finish_reason: result.finish_reason
+      })
+
+      result
+    after
+      stop_mcp(mcp_clients)
     end
+  end
 
-    emit(config, :run_completed, %{
-      content: result.content,
-      iterations: result.iterations,
-      total_tool_calls: result.total_tool_calls,
-      finish_reason: result.finish_reason
-    })
+  # ---------------------------------------------------------------------------
+  # MCP lifecycle
+  # ---------------------------------------------------------------------------
 
-    result
+  defp start_mcp(%LoopConfig{mcp_servers: []} = config) do
+    {%{}, config}
+  end
+
+  defp start_mcp(%LoopConfig{} = config) do
+    clients =
+      Enum.reduce(config.mcp_servers, %{}, fn %MCPServer{} = server, acc ->
+        case MCPClient.start(server) do
+          {:ok, client} ->
+            Map.put(acc, server.name, client)
+
+          {:error, reason} ->
+            IO.warn("failed to start MCP server #{server.name}: #{inspect(reason)}")
+            acc
+        end
+      end)
+
+    registry = build_mcp_registry(config.registry, clients)
+    {clients, %{config | registry: registry, mcp_clients: clients}}
+  end
+
+  defp build_mcp_registry(registry, clients) do
+    registry = ToolRegistry.register(registry, MCPTool)
+
+    Enum.reduce(clients, registry, fn {server_name, client}, acc ->
+      case MCPClient.list_tools(client) do
+        {:ok, tools} ->
+          Enum.reduce(tools, acc, fn tool, reg ->
+            definition = ToolBridge.to_definition(server_name, tool)
+            ToolRegistry.register_as(reg, definition.function.name, MCPTool)
+          end)
+
+        {:error, _reason} ->
+          acc
+      end
+    end)
+  end
+
+  defp stop_mcp(clients) do
+    Enum.each(clients, fn {_name, client} -> MCPClient.stop(client) end)
   end
 
   # ---------------------------------------------------------------------------
@@ -194,9 +250,12 @@ defmodule AgentLoop.Loop do
 
     resolved_name = ToolRegistry.strip_prefix(name, config.tool_call_prefix)
 
-    Context.put(config.session_id, config.persistence)
+    Context.put(config.session_id, config.persistence, config.mcp_clients)
 
-    result = ToolRegistry.execute(config.registry, id, resolved_name, args)
+    result =
+      ToolRegistry.execute(config.registry, id, resolved_name, args, %{
+        mcp_clients: config.mcp_clients
+      })
 
     Context.clear()
 

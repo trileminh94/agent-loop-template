@@ -50,6 +50,11 @@ lib/
     │   ├── openai_compatible.ex          # OpenAI-compatible provider
     │   └── deepseek.ex                   # DeepSeek provider
     ├── persistence.ex                    # Persistence behaviour
+    ├── mcp/                              # MCP client and bridge
+    │   ├── client.ex                     # Stdio JSON-RPC client
+    │   ├── messages.ex                   # JSON-RPC builders
+    │   ├── server.ex                     # MCP server config
+    │   └── tool_bridge.ex                # MCP -> AgentLoop tool mapping
     ├── persistence/
     │   ├── no_op.ex                      # No-op default adapter
     │   ├── sqlite.ex                     # SQLite-backed adapter
@@ -311,6 +316,29 @@ result = AgentLoop.run(request, config)
 
 Implement the `AgentLoop.Persistence` behaviour and pass the `{Adapter, state}` tuple to `LoopConfig.new/3`.
 
+## MCP support
+
+The loop can discover and call tools from MCP (Model Context Protocol) servers via stdio.
+
+```elixir
+alias AgentLoop.MCP.Server
+
+mcp_server = %Server{
+  name: "filesystem",
+  command: "npx",
+  args: ["-y", "@modelcontextprotocol/server-filesystem", "."]
+}
+
+config = AgentLoop.LoopConfig.new(provider, registry,
+  model: "gpt-4o-mini",
+  mcp_servers: [mcp_server]
+)
+
+result = AgentLoop.run(AgentLoop.RunRequest.new("List files"), config)
+```
+
+MCP tools are prefixed with `mcp_<server_name>__` so they do not collide with native tools.
+
 ## Examples
 
 See the `examples/` directory for runnable scripts:
@@ -319,6 +347,7 @@ See the `examples/` directory for runnable scripts:
 - `examples/custom_tool.exs` — writing and registering a custom tool
 - `examples/coding_agent.exs` — read/search/edit local files
 - `examples/persistence.exs` — resume sessions and inspect traces
+- `examples/mcp.exs` — use an MCP stdio server
 
 Run any example with:
 

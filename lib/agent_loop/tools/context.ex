@@ -14,17 +14,22 @@ defmodule AgentLoop.Tools.Context do
 
   @type t :: %{
           session_id: String.t() | nil,
-          persistence: AgentLoop.Persistence.t() | nil
+          persistence: AgentLoop.Persistence.t() | nil,
+          mcp_clients: %{String.t() => AgentLoop.MCP.Client.t()}
         }
 
   @doc "Set the context for the current process."
-  def put(session_id, persistence) do
-    Process.put(@key, %{session_id: session_id, persistence: persistence})
+  def put(session_id, persistence, mcp_clients \\ %{}) do
+    Process.put(@key, %{
+      session_id: session_id,
+      persistence: persistence,
+      mcp_clients: mcp_clients
+    })
   end
 
   @doc "Get the current context."
   def get do
-    Process.get(@key, %{session_id: nil, persistence: nil})
+    Process.get(@key, %{session_id: nil, persistence: nil, mcp_clients: %{}})
   end
 
   @doc "Clear the context."
