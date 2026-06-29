@@ -4,6 +4,24 @@ A minimal, reusable **think → act → observe** agent loop in Elixir.
 
 This template is designed to be copied into another project and extended with your own providers, tools, and persistence layer. It is intentionally small: no GenServer, no channels, no multi-tenancy. It ships with a functional agent loop, workspace-aware coding tools, OpenAI and DeepSeek providers, and optional SQLite persistence.
 
+## Installation
+
+Add `agent_loop` to your `mix.exs`:
+
+```elixir
+def deps do
+  [
+    {:agent_loop, "~> 0.2.0"}
+  ]
+end
+```
+
+Then run:
+
+```bash
+mix deps.get
+```
+
 ## What it does
 
 1. Takes a user message and conversation history.
@@ -292,6 +310,22 @@ result = AgentLoop.run(request, config)
 ### Custom adapters
 
 Implement the `AgentLoop.Persistence` behaviour and pass the `{Adapter, state}` tuple to `LoopConfig.new/3`.
+
+## Examples
+
+See the `examples/` directory for runnable scripts:
+
+- `examples/basic_loop.exs` — minimal tool loop
+- `examples/custom_tool.exs` — writing and registering a custom tool
+- `examples/coding_agent.exs` — read/search/edit local files
+- `examples/persistence.exs` — resume sessions and inspect traces
+
+Run any example with:
+
+```bash
+export OPENAI_API_KEY=sk-...
+mix run examples/basic_loop.exs
+```
 
 ## Running tests
 
