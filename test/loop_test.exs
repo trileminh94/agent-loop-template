@@ -57,10 +57,12 @@ defmodule AgentLoop.LoopTest do
       assert result.iterations == 2
       assert result.total_tool_calls == 1
 
-      assert [_, _, assistant_msg, tool_msg] = result.messages
+      assert [_, _, assistant_msg, tool_msg, final_msg] = result.messages
       assert assistant_msg.role == :assistant
       assert tool_msg.role == :tool
       assert tool_msg.content == "Echo: world"
+      assert final_msg.role == :assistant
+      assert final_msg.content == "done echoing"
     end
 
     test "executes multiple tools in parallel" do

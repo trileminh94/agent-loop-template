@@ -24,6 +24,9 @@ defmodule AgentLoop.MixProject do
       # Consumers can replace this with Finch or another client.
       {:req, "~> 0.5.0"},
 
+      # Persistence adapter default.
+      {:exqlite, "~> 0.23"},
+
       # Dev/test
       {:jason, "~> 1.4"},
       {:ex_doc, "~> 0.31", only: :dev, runtime: false}

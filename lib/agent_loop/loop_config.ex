@@ -1,8 +1,23 @@
 defmodule AgentLoop.LoopConfig do
   @moduledoc """
   Configuration for the agent loop.
+
+  ## Persistence
+
+  Pass a `persistence` tuple (usually obtained via `AgentLoop.Persistence.new/2`)
+  to enable session history, memory, and traces. Set `trace: true` to persist
+  every loop event.
+
+      {:ok, persistence} = AgentLoop.Persistence.new(AgentLoop.Persistence.SQLite, database: "data.db")
+
+      config = AgentLoop.LoopConfig.new(provider, registry,
+        persistence: persistence,
+        trace: true
+      )
   """
 
+  alias AgentLoop.Persistence
+  alias AgentLoop.Persistence.NoOp
   alias AgentLoop.ToolRegistry
 
   @type event_callback :: (AgentLoop.Event.t() -> any())
@@ -19,7 +34,10 @@ defmodule AgentLoop.LoopConfig do
           event_callback: event_callback() | nil,
           tool_call_prefix: String.t() | nil,
           allow_tools: [String.t()] | nil,
-          deny_tools: [String.t()] | nil
+          deny_tools: [String.t()] | nil,
+          persistence: Persistence.t(),
+          trace: boolean(),
+          session_id: String.t() | nil
         }
 
   defstruct provider: nil,
@@ -33,10 +51,16 @@ defmodule AgentLoop.LoopConfig do
             event_callback: nil,
             tool_call_prefix: nil,
             allow_tools: nil,
-            deny_tools: nil
+            deny_tools: nil,
+            persistence: {NoOp, nil},
+            trace: false,
+            session_id: nil
 
   @doc "Create a config with required fields."
   def new(provider, registry, opts \\ []) do
+    persistence = Keyword.get(opts, :persistence, {NoOp, nil})
+    trace = Keyword.get(opts, :trace, false)
+
     %__MODULE__{
       provider: provider,
       registry: registry,
@@ -49,7 +73,9 @@ defmodule AgentLoop.LoopConfig do
       event_callback: Keyword.get(opts, :event_callback),
       tool_call_prefix: Keyword.get(opts, :tool_call_prefix),
       allow_tools: Keyword.get(opts, :allow_tools),
-      deny_tools: Keyword.get(opts, :deny_tools)
+      deny_tools: Keyword.get(opts, :deny_tools),
+      persistence: persistence,
+      trace: trace
     }
   end
 end

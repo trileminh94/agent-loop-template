@@ -140,10 +140,16 @@ defmodule AgentLoop.Tools.WorkspaceToolsTest do
   end
 
   describe "Memory" do
-    test "remembers and recalls notes", %{tmp: _tmp} do
+    test "remembers and recalls notes", %{tmp: tmp} do
+      db = Path.join(tmp, "memory.db")
+      {:ok, persistence} = AgentLoop.Persistence.new(AgentLoop.Persistence.SQLite, database: db)
+      AgentLoop.Tools.Context.put("test-session", persistence)
+
       assert {:ok, _} = Memory.execute(%{"action" => "remember", "note" => "use Elixir"})
       assert {:ok, content} = Memory.execute(%{"action" => "recall"})
       assert content =~ "use Elixir"
+
+      AgentLoop.Tools.Context.clear()
     end
   end
 

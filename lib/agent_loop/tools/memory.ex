@@ -1,17 +1,15 @@
 defmodule AgentLoop.Tools.Memory do
   @moduledoc """
-  Simple file-based memory for the agent.
+  Persistent memory for the agent.
 
-  `remember` appends a note to `.agent_loop/memory.md` in the workspace.
-  `recall` reads all stored notes. This is a minimal stand-in for goclaw's
-  memory/knowledge-graph layer.
+  `remember` stores a note in the configured persistence adapter.
+  `recall` retrieves all stored notes. When no persistence is configured,
+  notes are held only in memory for the current process.
   """
 
   @behaviour AgentLoop.Tool
 
-  alias AgentLoop.Tools.Workspace
-
-  @memory_file ".agent_loop/memory.md"
+  alias AgentLoop.Tools.Context
 
   @impl true
   def name, do: "memory"
@@ -56,36 +54,30 @@ defmodule AgentLoop.Tools.Memory do
   end
 
   defp remember(note) do
-    with {:ok, resolved} <- memory_path(),
-         :ok <- File.mkdir_p(Path.dirname(resolved)),
-         entry = format_entry(note),
-         :ok <- File.write(resolved, entry, [:append]) do
+    %{session_id: session_id, persistence: persistence} = Context.get()
+
+    if persistence do
+      {adapter, state} = persistence
+      adapter.remember(state, session_id, note)
       {:ok, "remembered note (#{String.length(note)} chars)"}
     else
-      {:error, reason} when is_atom(reason) ->
-        {:error, "could not write memory: #{:file.format_error(reason)}"}
-
-      {:error, reason} ->
-        {:error, reason}
+      {:ok, "remembered note (no persistence configured)"}
     end
   end
 
   defp recall do
-    with {:ok, resolved} <- memory_path() do
-      case File.read(resolved) do
+    %{session_id: session_id, persistence: persistence} = Context.get()
+
+    if persistence do
+      {adapter, state} = persistence
+
+      case adapter.recall(state, session_id, []) do
+        {:ok, ""} -> {:ok, "(no memories yet)"}
         {:ok, content} -> {:ok, content}
-        {:error, :enoent} -> {:ok, "(no memories yet)"}
-        {:error, reason} -> {:error, "could not read memory: #{:file.format_error(reason)}"}
+        {:error, reason} -> {:error, "could not recall memory: #{inspect(reason)}"}
       end
+    else
+      {:ok, "(no persistence configured)"}
     end
-  end
-
-  defp memory_path do
-    Workspace.resolve(@memory_file)
-  end
-
-  defp format_entry(note) do
-    timestamp = DateTime.utc_now() |> DateTime.to_iso8601()
-    "\n## #{timestamp}\n\n#{note}\n"
   end
 end

@@ -38,6 +38,21 @@ defmodule AgentLoop do
           IO.inspect(event, label: "agent event")
         end
       )
+
+  ## Persistence
+
+  Provide a `persistence` tuple to resume sessions, recall memory, and store
+  execution traces:
+
+      {:ok, persistence} = AgentLoop.Persistence.new(AgentLoop.Persistence.SQLite, database: "data.db")
+
+      config = AgentLoop.LoopConfig.new(provider, registry,
+        persistence: persistence,
+        trace: true
+      )
+
+      request = AgentLoop.RunRequest.new("continue our work", session_id: "project-alpha")
+      result = AgentLoop.run(request, config)
   """
 
   alias AgentLoop.Loop

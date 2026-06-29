@@ -3,6 +3,8 @@ defmodule AgentLoop.ToolCall do
   A tool invocation requested by the LLM.
   """
 
+  @derive {Jason.Encoder, only: [:id, :name, :arguments, :parse_error]}
+
   @type t :: %__MODULE__{
           id: String.t(),
           name: String.t(),

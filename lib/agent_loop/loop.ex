@@ -15,11 +15,24 @@ defmodule AgentLoop.Loop do
   alias AgentLoop.RunResult
   alias AgentLoop.ToolCall
   alias AgentLoop.ToolRegistry
+  alias AgentLoop.Tools.Context
 
   @doc "Run the agent loop."
   def run(%RunRequest{} = request, %LoopConfig{} = config) do
+    {adapter, persistence_state} = config.persistence
+
+    loaded_history =
+      if request.session_id do
+        case adapter.load_session(persistence_state, request.session_id) do
+          {:ok, %{messages: messages}} -> messages
+          _ -> []
+        end
+      else
+        []
+      end
+
     state = %LoopState{
-      messages: build_initial_messages(request, config),
+      messages: build_initial_messages(request, config, loaded_history),
       iteration: 0,
       total_tool_calls: 0,
       pending_messages: [],
@@ -30,9 +43,28 @@ defmodule AgentLoop.Loop do
       finish_reason: :complete
     }
 
+    config =
+      %{config | session_id: request.session_id}
+      |> then(fn config ->
+        if config.trace or request.session_id do
+          %{config | event_callback: wrap_callback(config, request)}
+        else
+          config
+        end
+      end)
+
     emit(config, :run_started, %{message: request.message})
 
     result = iterate(state, config)
+
+    if request.session_id do
+      adapter.save_session(
+        persistence_state,
+        request.session_id,
+        result.messages,
+        session_metadata(request, result)
+      )
+    end
 
     emit(config, :run_completed, %{
       content: result.content,
@@ -110,6 +142,8 @@ defmodule AgentLoop.Loop do
   end
 
   defp handle_response(state, _config, %{content: content} = response) do
+    state = append_message(state, Message.assistant(content))
+
     finalize(
       %{
         state
@@ -160,7 +194,11 @@ defmodule AgentLoop.Loop do
 
     resolved_name = ToolRegistry.strip_prefix(name, config.tool_call_prefix)
 
+    Context.put(config.session_id, config.persistence)
+
     result = ToolRegistry.execute(config.registry, id, resolved_name, args)
+
+    Context.clear()
 
     emit(config, :tool_result, %{
       id: id,
@@ -180,7 +218,7 @@ defmodule AgentLoop.Loop do
   # Helpers
   # ---------------------------------------------------------------------------
 
-  defp build_initial_messages(%RunRequest{} = request, %LoopConfig{} = config) do
+  defp build_initial_messages(%RunRequest{} = request, %LoopConfig{} = config, loaded_history) do
     messages =
       if config.system_prompt do
         [Message.system(config.system_prompt)]
@@ -188,7 +226,7 @@ defmodule AgentLoop.Loop do
         []
       end
 
-    messages = messages ++ request.history
+    messages = messages ++ loaded_history ++ request.history
 
     if request.message != nil and request.message != "" do
       messages ++ [Message.user(request.message)]
@@ -223,6 +261,34 @@ defmodule AgentLoop.Loop do
       total_tool_calls: state.total_tool_calls,
       usage: state.usage,
       finish_reason: state.finish_reason
+    }
+  end
+
+  defp wrap_callback(config, request) do
+    original = config.event_callback
+
+    fn event ->
+      if original, do: original.(event)
+
+      {adapter, state} = config.persistence
+
+      adapter.write_trace(
+        state,
+        request.session_id,
+        request.run_id,
+        %{type: event.type, payload: event.payload}
+      )
+
+      :ok
+    end
+  end
+
+  defp session_metadata(request, result) do
+    %{
+      "run_id" => request.run_id,
+      "finish_reason" => result.finish_reason,
+      "iterations" => result.iterations,
+      "total_tool_calls" => result.total_tool_calls
     }
   end
 

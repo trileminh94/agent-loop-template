@@ -12,6 +12,9 @@ defmodule Mix.Tasks.Agent.Run do
       --workspace PATH    Workspace directory (default: current directory)
       --model MODEL       LLM model (provider defaults apply)
       --base-url URL      Provider base URL (provider defaults apply)
+      --session ID        Session id for resuming conversations
+      --memory-db PATH    SQLite database file for persistence (default: .agent_loop/sessions.db)
+      --trace             Persist execution traces
       --no-restrict       Allow paths outside the workspace
       --max-iterations N  Maximum loop iterations (default: 10)
 
@@ -24,6 +27,7 @@ defmodule Mix.Tasks.Agent.Run do
 
   use Mix.Task
 
+  alias AgentLoop.Persistence
   alias AgentLoop.ToolRegistry
   alias AgentLoop.Tools.EditFile
   alias AgentLoop.Tools.FetchURL
@@ -46,6 +50,9 @@ defmodule Mix.Tasks.Agent.Run do
           workspace: :string,
           model: :string,
           base_url: :string,
+          session: :string,
+          memory_db: :string,
+          trace: :boolean,
           restrict: :boolean,
           max_iterations: :integer
         ],
@@ -59,6 +66,9 @@ defmodule Mix.Tasks.Agent.Run do
     restrict = Keyword.get(opts, :restrict, true)
     model = Keyword.get(opts, :model, provider_config.default_model)
     base_url = Keyword.get(opts, :base_url, provider_config.default_base_url)
+    session_id = Keyword.get(opts, :session)
+    memory_db = Keyword.get(opts, :memory_db, Path.join(workspace, ".agent_loop/sessions.db"))
+    trace? = Keyword.get(opts, :trace, false)
     max_iterations = Keyword.get(opts, :max_iterations, 10)
 
     Workspace.configure(root: workspace, restrict: restrict)
@@ -70,6 +80,14 @@ defmodule Mix.Tasks.Agent.Run do
     end
 
     provider = provider_config.builder.(api_key, base_url)
+
+    persistence =
+      if not is_nil(session_id) or trace? do
+        {:ok, persistence} = Persistence.new(AgentLoop.Persistence.SQLite, database: memory_db)
+        persistence
+      else
+        {AgentLoop.Persistence.NoOp, nil}
+      end
 
     registry =
       ToolRegistry.new()
@@ -98,10 +116,12 @@ defmodule Mix.Tasks.Agent.Run do
         model: model,
         system_prompt: system_prompt,
         max_iterations: max_iterations,
+        persistence: persistence,
+        trace: trace?,
         event_callback: &handle_event/1
       )
 
-    request = AgentLoop.RunRequest.new(prompt)
+    request = AgentLoop.RunRequest.new(prompt, session_id: session_id)
     result = AgentLoop.run(request, config)
 
     IO.puts("\n---")
@@ -111,6 +131,7 @@ defmodule Mix.Tasks.Agent.Run do
     )
 
     IO.puts("Reason: #{result.finish_reason}")
+    IO.puts("Session: #{session_id || "(none)"}")
     IO.puts("\n#{result.content}")
 
     Workspace.reset()
