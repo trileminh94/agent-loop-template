@@ -320,6 +320,91 @@ result = AgentLoop.run(request, config)
 
 Implement the `AgentLoop.Persistence` behaviour and pass the `{Adapter, state}` tuple to `LoopConfig.new/3`.
 
+## Streaming
+
+Enable streaming to receive content and tool-call deltas as they arrive:
+
+```elixir
+config = AgentLoop.LoopConfig.new(provider, registry,
+  model: "gpt-4o-mini",
+  stream: true,
+  event_callback: fn event ->
+    case event.type do
+      :content_delta -> IO.write(event.payload.content)
+      :tool_call_name -> IO.inspect(event.payload, label: "tool")
+      _ -> :ok
+    end
+  end
+)
+```
+
+The provider must implement `AgentLoop.Provider.chat_stream/3`. The loop falls back to `chat/2` for providers that do not.
+
+## Retry policy
+
+Configure retries for transient provider errors:
+
+```elixir
+config = AgentLoop.LoopConfig.new(provider, registry,
+  max_retries: 3,
+  retry_backoff_ms: 500,
+  retry_on: fn reason -> match?(%{status: status} when status in 500..599, reason) end
+)
+```
+
+## Context-window truncation
+
+On context-length errors, the loop can drop older messages and retry:
+
+```elixir
+config = AgentLoop.LoopConfig.new(provider, registry,
+  truncation_strategy: :drop_oldest,
+  max_truncation_retries: 1
+)
+```
+
+## Structured output
+
+Parse and validate JSON responses:
+
+```elixir
+result = AgentLoop.run(request, config)
+
+validator = fn data ->
+  if is_map(data) and is_integer(data["answer"]),
+    do: {:ok, data},
+    else: {:error, :invalid_shape}
+end
+
+{:ok, parsed} = AgentLoop.StructuredOutput.parse_json(result, validator)
+```
+
+## Tool middleware
+
+Register middleware modules to inspect or transform tool calls:
+
+```elixir
+defmodule MyApp.AuditMiddleware do
+  @behaviour AgentLoop.ToolMiddleware
+
+  @impl true
+  def before_execute(tool_call, _context) do
+    IO.inspect(tool_call, label: "executing")
+    {:ok, tool_call}
+  end
+
+  @impl true
+  def after_execute(result, _tool_call, _context) do
+    result
+  end
+end
+
+registry =
+  AgentLoop.ToolRegistry.new()
+  |> AgentLoop.ToolRegistry.register_many([...])
+  |> AgentLoop.ToolRegistry.add_middleware(MyApp.AuditMiddleware)
+```
+
 ## MCP support
 
 The loop can discover and call tools from MCP (Model Context Protocol) servers via stdio.
