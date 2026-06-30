@@ -437,6 +437,7 @@ See the `examples/` directory for runnable scripts:
 - `examples/coding_agent.exs` — read/search/edit local files
 - `examples/persistence.exs` — resume sessions and inspect traces
 - `examples/mcp.exs` — use an MCP stdio server
+- `examples/kimi_code_clone/` — a full supervised CLI agent with approval prompts
 
 Run any example with:
 

@@ -9,3 +9,9 @@ erl_crash.dump
 /config/*.secret.exs
 .elixir_ls/
 .agent_loop/*.db
+
+# Nested example projects
+examples/**/_build/
+examples/**/deps/
+examples/**/.kimi_code_clone/*.db
+examples/**/mix.lock
