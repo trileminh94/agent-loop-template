@@ -30,7 +30,7 @@ defmodule AgentLoop.Tools.ListFiles do
   end
 
   @impl true
-  def execute(args) do
+  def execute(args, _context) do
     path = Map.get(args, "path", ".")
 
     case Workspace.resolve(path) do

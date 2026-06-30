@@ -46,7 +46,7 @@ defmodule AgentLoop.Tools.EditFile do
   end
 
   @impl true
-  def execute(args) do
+  def execute(args, _context) do
     path = Map.get(args, "path")
     old_string = Map.get(args, "old_string")
     new_string = Map.get(args, "new_string")

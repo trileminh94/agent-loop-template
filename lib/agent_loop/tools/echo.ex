@@ -27,11 +27,11 @@ defmodule AgentLoop.Tools.Echo do
   end
 
   @impl true
-  def execute(%{"message" => message}) do
+  def execute(%{"message" => message}, _context) do
     {:ok, "Echo: #{message}"}
   end
 
-  def execute(_args) do
+  def execute(_args, _context) do
     {:error, "missing required argument: message"}
   end
 end

@@ -9,8 +9,6 @@ defmodule AgentLoop.Tools.Memory do
 
   @behaviour AgentLoop.Tool
 
-  alias AgentLoop.Tools.Context
-
   @impl true
   def name, do: "memory"
 
@@ -39,23 +37,21 @@ defmodule AgentLoop.Tools.Memory do
   end
 
   @impl true
-  def execute(args) do
+  def execute(args, context) do
     action = Map.get(args, "action")
 
     case action do
-      "remember" -> remember(Map.get(args, "note"))
-      "recall" -> recall()
+      "remember" -> remember(Map.get(args, "note"), context)
+      "recall" -> recall(context)
       _ -> {:error, "invalid action: #{action}"}
     end
   end
 
-  defp remember(nil) do
+  defp remember(nil, _context) do
     {:error, "missing required argument: note"}
   end
 
-  defp remember(note) do
-    %{session_id: session_id, persistence: persistence} = Context.get()
-
+  defp remember(note, %{persistence: persistence, session_id: session_id}) do
     if persistence do
       {adapter, state} = persistence
       adapter.remember(state, session_id, note)
@@ -65,9 +61,7 @@ defmodule AgentLoop.Tools.Memory do
     end
   end
 
-  defp recall do
-    %{session_id: session_id, persistence: persistence} = Context.get()
-
+  defp recall(%{persistence: persistence, session_id: session_id}) do
     if persistence do
       {adapter, state} = persistence
 

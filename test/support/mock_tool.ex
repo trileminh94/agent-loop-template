@@ -23,9 +23,8 @@ defmodule AgentLoop.Support.MockTool do
   end
 
   @impl true
-  def execute(_args) do
-    # Tests override this via the configured result, but the behaviour expects
-    # execute/1 without state. We use the process dictionary for test control.
+  def execute(_args, _context) do
+    # Tests override this via the configured result stored in the process dictionary.
     case Process.get(:mock_tool_result, {:ok, "mock result"}) do
       {:ok, value} -> {:ok, value}
       {:error, reason} -> {:error, reason}

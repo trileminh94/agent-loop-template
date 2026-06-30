@@ -58,7 +58,7 @@ defmodule AgentLoop.Tools.ShellExec do
   end
 
   @impl true
-  def execute(args) do
+  def execute(args, _context) do
     command = Map.get(args, "command")
     cmd_args = Map.get(args, "args", [])
     timeout = Map.get(args, "timeout", @default_timeout_ms)

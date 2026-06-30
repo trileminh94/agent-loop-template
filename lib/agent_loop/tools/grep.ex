@@ -41,7 +41,7 @@ defmodule AgentLoop.Tools.Grep do
   end
 
   @impl true
-  def execute(args) do
+  def execute(args, _context) do
     pattern = Map.get(args, "pattern")
     path = Map.get(args, "path", ".")
     glob = Map.get(args, "glob")

@@ -18,18 +18,18 @@ defmodule KimiCodeClone.Tools.WriteFile do
   def parameters, do: BaseTool.parameters()
 
   @impl true
-  def execute(args) do
+  def execute(args, context) do
     path = Map.get(args, "path")
 
     # No approval needed for new files.
     if File.exists?(path) do
       if Approval.prompt(name(), args) do
-        BaseTool.execute(args)
+        BaseTool.execute(args, context)
       else
         {:error, "user denied write_file"}
       end
     else
-      BaseTool.execute(args)
+      BaseTool.execute(args, context)
     end
   end
 end

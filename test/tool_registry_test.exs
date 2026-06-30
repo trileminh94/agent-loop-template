@@ -78,7 +78,7 @@ defmodule AgentLoop.ToolRegistryTest do
         def name, do: "crasher"
         def description, do: "crashes"
         def parameters, do: %{"type" => "object", "properties" => %{}}
-        def execute(_args), do: raise("boom")
+        def execute(_args, _context), do: raise("boom")
       end
 
       registry = ToolRegistry.new() |> ToolRegistry.register(Crasher)

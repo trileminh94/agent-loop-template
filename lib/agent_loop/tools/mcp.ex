@@ -29,13 +29,13 @@ defmodule AgentLoop.Tools.MCP do
   end
 
   @impl true
-  def execute(_args) do
+  def execute(_args, _context) do
     # args is ignored; the actual tool name is passed via the tool_call name.
     {:error, "mcp dispatcher must be called through the registry with a prefixed name"}
   end
 
   @doc "Execute an MCP tool by its prefixed name and arguments."
-  def execute_prefixed(prefixed_name, args, context \\ nil) do
+  def execute_prefixed(prefixed_name, args, context) do
     clients = Map.get(context || %{}, :mcp_clients, %{})
 
     with {:ok, server_name, tool_name} <- ToolBridge.split_name(prefixed_name),

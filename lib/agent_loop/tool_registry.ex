@@ -1,30 +1,39 @@
 defmodule AgentLoop.ToolRegistry do
   @moduledoc """
-  Registry for tools available to the agent loop.
+  Registry of tool modules and their LLM-facing definitions.
 
   Supports:
-  - Registering tool modules
-  - Aliasing tool names
-  - Filtering by allow/deny lists
-  - Executing tools and wrapping results
+
+    * aliases (e.g. `ls` → `list_files`)
+    * enabled/disabled tools
+    * deterministic, sorted tool definitions for provider APIs
+    * context-aware execution with panic recovery
+
+  Inspired by goclaw's tool registry, but kept minimal.
   """
 
   alias AgentLoop.ToolCall
   alias AgentLoop.ToolDefinition
   alias AgentLoop.ToolResult
+  alias AgentLoop.Tools.Context
+  alias AgentLoop.Tools.MCP, as: MCPTool
 
   @type t :: %__MODULE__{
           tools: %{String.t() => module()},
           aliases: %{String.t() => String.t()},
-          middleware: [module()]
+          disabled: MapSet.t(String.t()),
+          middlewares: [module()]
         }
 
   defstruct tools: %{},
             aliases: %{},
-            middleware: []
+            disabled: MapSet.new(),
+            middlewares: []
 
   @doc "Create an empty registry."
-  def new, do: %__MODULE__{}
+  def new do
+    %__MODULE__{}
+  end
 
   @doc "Register a tool module under its `name/0`."
   def register(%__MODULE__{} = registry, tool_module) when is_atom(tool_module) do
@@ -42,12 +51,6 @@ defmodule AgentLoop.ToolRegistry do
     Enum.reduce(tool_modules, registry, &register(&2, &1))
   end
 
-  @doc "Register a middleware module."
-  def add_middleware(%__MODULE__{} = registry, middleware_module)
-      when is_atom(middleware_module) do
-    %{registry | middleware: registry.middleware ++ [middleware_module]}
-  end
-
   @doc "Create an alias from one name to another canonical name."
   def register_alias(%__MODULE__{} = registry, alias_name, canonical_name)
       when is_binary(alias_name) and is_binary(canonical_name) do
@@ -58,31 +61,85 @@ defmodule AgentLoop.ToolRegistry do
     end
   end
 
-  @doc "Resolve a name to its canonical tool module, if any."
-  def resolve(%__MODULE__{} = registry, name) when is_binary(name) do
-    canonical = Map.get(registry.aliases, name, name)
+  @doc "Disable a tool (and its aliases) by name. Disabled tools are excluded from definitions and execution."
+  def disable(%__MODULE__{} = registry, name) when is_binary(name) do
+    %{registry | disabled: MapSet.put(registry.disabled, name)}
+  end
 
-    case Map.get(registry.tools, canonical) do
-      nil -> :error
-      tool_module -> {:ok, tool_module, canonical}
+  @doc "Re-enable a previously disabled tool."
+  def enable(%__MODULE__{} = registry, name) when is_binary(name) do
+    %{registry | disabled: MapSet.delete(registry.disabled, name)}
+  end
+
+  @doc "Add a middleware module to the registry."
+  def add_middleware(%__MODULE__{} = registry, middleware_module)
+      when is_atom(middleware_module) do
+    %{registry | middlewares: registry.middlewares ++ [middleware_module]}
+  end
+
+  @doc "Return true if the tool is disabled."
+  def disabled?(%__MODULE__{} = registry, name) when is_binary(name) do
+    MapSet.member?(registry.disabled, name)
+  end
+
+  @doc "Resolve a name to its canonical name and tool module."
+  def resolve(%__MODULE__{} = registry, name) when is_binary(name) do
+    cond do
+      Map.has_key?(registry.tools, name) and not disabled?(registry, name) ->
+        {:ok, Map.fetch!(registry.tools, name), name}
+
+      Map.has_key?(registry.aliases, name) ->
+        canonical = Map.fetch!(registry.aliases, name)
+
+        if disabled?(registry, canonical) do
+          :error
+        else
+          case Map.fetch(registry.tools, canonical) do
+            {:ok, module} -> {:ok, module, canonical}
+            :error -> :error
+          end
+        end
+
+      true ->
+        :error
     end
   end
 
-  @doc "Return all tool definitions, optionally filtered by allow/deny lists."
+  @doc "Return LLM-facing definitions, sorted deterministically."
   def definitions(%__MODULE__{} = registry, opts \\ []) do
     allow = Keyword.get(opts, :allow)
-    deny = Keyword.get(opts, :deny) || []
+    deny = Keyword.get(opts, :deny)
+    prefix = Keyword.get(opts, :prefix)
 
     registry.tools
-    |> Map.keys()
-    |> maybe_filter(allow, & &1)
-    |> Enum.reject(fn name -> name in deny end)
-    |> Enum.sort()
-    |> Enum.map(fn name -> ToolDefinition.from_module(registry.tools[name]) end)
+    |> Enum.reject(fn {name, _} -> disabled?(registry, name) end)
+    |> Enum.filter(fn {name, _} ->
+      allowed = is_nil(allow) or name in allow
+      not_denied = is_nil(deny) or name not in deny
+      allowed and not_denied
+    end)
+    |> Enum.map(fn {name, module} ->
+      def_name = if prefix, do: "#{prefix}#{name}", else: name
+
+      ToolDefinition.new(module,
+        name: def_name,
+        description: module.description(),
+        parameters: module.parameters()
+      )
+    end)
+    |> Enum.sort_by(& &1.function.name)
   end
 
-  @doc "Execute a tool by name with the given arguments."
-  def execute(%__MODULE__{} = registry, tool_call_id, name, args, context \\ nil)
+  @doc """
+  Execute a tool by name with the given arguments and context.
+
+  The context is passed as the second argument to the tool's `execute/2` callback.
+  Execution is wrapped in `try/catch` so a crashing tool returns an error result
+  instead of bringing down the loop.
+
+  Registered middleware is run before and after the tool call.
+  """
+  def execute(%__MODULE__{} = registry, tool_call_id, name, args, context \\ %Context{})
       when is_binary(tool_call_id) and is_binary(name) and is_map(args) do
     case resolve(registry, name) do
       :error ->
@@ -91,24 +148,38 @@ defmodule AgentLoop.ToolRegistry do
       {:ok, tool_module, canonical_name} ->
         tool_call = %ToolCall{id: tool_call_id, name: canonical_name, arguments: args}
 
-        case run_before_middleware(registry.middleware, tool_call, context) do
+        case run_before_middlewares(registry.middlewares, tool_call, context) do
+          {:ok, tool_call} ->
+            result = execute_tool(tool_module, tool_call, context)
+            run_after_middlewares(registry.middlewares, result, tool_call, context)
+
           {:error, reason} ->
             ToolResult.error(tool_call_id, canonical_name, reason)
-
-          {:ok, %ToolCall{} = prepared_call} ->
-            result = execute_tool(tool_module, prepared_call, context)
-            run_after_middleware(registry.middleware, result, prepared_call, context)
         end
+    end
+  end
+
+  defp execute_tool(MCPTool, %ToolCall{} = tool_call, context) do
+    case MCPTool.execute_prefixed(tool_call.name, tool_call.arguments, context) do
+      {:ok, content} ->
+        ToolResult.ok(tool_call.id, tool_call.name, content)
+
+      {:ok, content, user_content} ->
+        ToolResult.ok(tool_call.id, tool_call.name, content, user_content)
+
+      {:error, reason} ->
+        ToolResult.error(tool_call.id, tool_call.name, reason)
     end
   end
 
   defp execute_tool(tool_module, %ToolCall{} = tool_call, context) do
     try do
-      result = run_tool(tool_module, tool_call.name, tool_call.arguments, context)
-
-      case result do
+      case tool_module.execute(tool_call.arguments, context) do
         {:ok, content} ->
           ToolResult.ok(tool_call.id, tool_call.name, content)
+
+        {:ok, content, user_content} ->
+          ToolResult.ok(tool_call.id, tool_call.name, content, user_content)
 
         {:error, reason} ->
           ToolResult.error(tool_call.id, tool_call.name, reason)
@@ -130,33 +201,25 @@ defmodule AgentLoop.ToolRegistry do
     end
   end
 
-  defp run_before_middleware(middleware, tool_call, context) do
-    Enum.reduce_while(middleware, {:ok, tool_call}, fn module, {:ok, call} ->
-      case module.before_execute(call, context) do
-        {:ok, %ToolCall{} = next_call} -> {:cont, {:ok, next_call}}
+  defp run_before_middlewares(middlewares, tool_call, context) do
+    Enum.reduce_while(middlewares, {:ok, tool_call}, fn middleware, {:ok, acc} ->
+      case middleware.before_execute(acc, context) do
+        {:ok, new_call} -> {:cont, {:ok, new_call}}
         {:error, reason} -> {:halt, {:error, reason}}
-        other -> {:halt, {:error, "middleware #{module} returned invalid: #{inspect(other)}"}}
       end
     end)
   end
 
-  defp run_after_middleware(middleware, result, tool_call, context) do
-    Enum.reduce(middleware, result, fn module, acc ->
-      module.after_execute(acc, tool_call, context)
+  defp run_after_middlewares(middlewares, result, tool_call, context) do
+    middlewares
+    |> Enum.reverse()
+    |> Enum.reduce(result, fn middleware, acc ->
+      middleware.after_execute(acc, tool_call, context)
     end)
   end
 
-  defp run_tool(AgentLoop.Tools.MCP, canonical_name, args, context) do
-    AgentLoop.Tools.MCP.execute_prefixed(canonical_name, args, context)
-  end
-
-  defp run_tool(tool_module, _canonical_name, args, _context) do
-    tool_module.execute(args)
-  end
-
-  @doc "Strip a configured prefix from a tool-call name returned by the model."
+  @doc "Strip a prefix from a tool name, if present."
   def strip_prefix(name, nil), do: name
-  def strip_prefix(name, ""), do: name
 
   def strip_prefix(name, prefix) when is_binary(prefix) do
     if String.starts_with?(name, prefix) do
@@ -165,9 +228,4 @@ defmodule AgentLoop.ToolRegistry do
       name
     end
   end
-
-  defp maybe_filter(names, nil, _key_fn), do: names
-
-  defp maybe_filter(names, allow, key_fn),
-    do: Enum.filter(names, fn name -> key_fn.(name) in allow end)
 end

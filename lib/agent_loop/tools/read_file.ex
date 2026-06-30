@@ -41,7 +41,7 @@ defmodule AgentLoop.Tools.ReadFile do
   end
 
   @impl true
-  def execute(args) do
+  def execute(args, _context) do
     path = Map.get(args, "path")
     offset = max(Map.get(args, "offset", 1) - 1, 0)
     limit = Map.get(args, "limit")

@@ -336,20 +336,21 @@ defmodule AgentLoop.Loop do
 
     resolved_name = ToolRegistry.strip_prefix(name, config.tool_call_prefix)
 
-    Context.put(config.session_id, config.persistence, config.mcp_clients)
+    context = %Context{
+      session_id: config.session_id,
+      persistence: config.persistence,
+      mcp_clients: config.mcp_clients
+    }
 
-    result =
-      ToolRegistry.execute(config.registry, id, resolved_name, args, %{
-        mcp_clients: config.mcp_clients
-      })
-
-    Context.clear()
+    result = ToolRegistry.execute(config.registry, id, resolved_name, args, context)
 
     emit(config, :tool_result, %{
       id: id,
       name: result.name,
       content: truncate(result.content, 500),
-      is_error: result.is_error
+      is_error: result.is_error,
+      user_content: result.user_content,
+      silent: result.silent
     })
 
     result

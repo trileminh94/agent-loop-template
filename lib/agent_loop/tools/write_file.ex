@@ -39,7 +39,7 @@ defmodule AgentLoop.Tools.WriteFile do
   end
 
   @impl true
-  def execute(args) do
+  def execute(args, _context) do
     path = Map.get(args, "path")
     content = Map.get(args, "content", "")
     append? = Map.get(args, "append", false)

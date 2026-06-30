@@ -31,7 +31,7 @@ defmodule AgentLoop.Tools.FetchURL do
   end
 
   @impl true
-  def execute(args) do
+  def execute(args, _context) do
     url = Map.get(args, "url")
 
     if is_nil(url) or url == "" do
