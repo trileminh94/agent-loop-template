@@ -321,7 +321,8 @@ defmodule AgentLoop.Loop do
       |> Task.async_stream(
         fn tc -> execute_single_tool(config, tc) end,
         ordered: true,
-        max_concurrency: length(tool_calls)
+        max_concurrency: length(tool_calls),
+        timeout: config.tool_timeout_ms
       )
       |> Enum.map(fn {:ok, result} -> result end)
 
