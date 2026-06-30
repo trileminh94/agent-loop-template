@@ -164,13 +164,98 @@ defmodule AgentLoop.Loop do
       max_tokens: config.max_tokens
     }
 
-    case config.provider.__struct__.chat(config.provider, request) do
+    case call_provider_with_retries(config, request, config.max_retries) do
       {:ok, response} ->
         handle_response(state, config, response)
 
-      {:error, _reason} ->
-        finalize(%{state | finish_reason: :error}, config)
+      {:error, reason} ->
+        if context_length_error?(reason) and
+             state.truncation_retries < config.max_truncation_retries and
+             config.truncation_strategy != nil do
+          emit(config, :truncation, %{reason: reason, strategy: config.truncation_strategy})
+
+          state
+          |> truncate_messages(config)
+          |> then(&iterate(%{&1 | truncation_retries: state.truncation_retries + 1}, config))
+        else
+          finalize(%{state | finish_reason: :error}, config)
+        end
     end
+  end
+
+  defp context_length_error?(%{
+         status: 400,
+         body: %{"error" => %{"code" => "context_length_exceeded"}}
+       }),
+       do: true
+
+  defp context_length_error?(%{status: 400, body: %{"error" => %{"message" => message}}}) do
+    is_binary(message) and String.contains?(message, "context length")
+  end
+
+  defp context_length_error?(%{status: 413}), do: true
+  defp context_length_error?(_reason), do: false
+
+  defp truncate_messages(state, %{truncation_strategy: :drop_oldest}) do
+    messages = state.messages
+
+    {prefix, truncatable} =
+      case messages do
+        [%Message{role: :system} | rest] -> {[hd(messages)], rest}
+        _ -> {[], messages}
+      end
+
+    drop_count = max(div(length(truncatable), 2), 1)
+    kept = Enum.drop(truncatable, drop_count)
+
+    %{state | messages: prefix ++ kept}
+  end
+
+  defp truncate_messages(state, _config), do: state
+
+  defp call_provider_with_retries(config, request, retries_remaining) do
+    case call_provider(config, request) do
+      {:ok, response} ->
+        {:ok, response}
+
+      {:error, reason} = error ->
+        if retries_remaining > 0 and retryable?(config, reason) do
+          Process.sleep(config.retry_backoff_ms)
+          call_provider_with_retries(config, request, retries_remaining - 1)
+        else
+          error
+        end
+    end
+  end
+
+  defp retryable?(%LoopConfig{retry_on: nil}, _reason), do: true
+  defp retryable?(%LoopConfig{retry_on: fun}, reason) when is_function(fun, 1), do: fun.(reason)
+  defp retryable?(_config, _reason), do: false
+
+  defp call_provider(%LoopConfig{stream: true} = config, request) do
+    provider = config.provider.__struct__
+
+    if function_exported?(provider, :chat_stream, 3) do
+      provider.chat_stream(config.provider, request, &emit_stream_delta(config, &1))
+    else
+      provider.chat(config.provider, request)
+    end
+  end
+
+  defp call_provider(config, request) do
+    config.provider.__struct__.chat(config.provider, request)
+  end
+
+  defp emit_stream_delta(config, {:content_delta, content}) do
+    emit(config, :content_delta, %{content: content})
+  end
+
+  defp emit_stream_delta(config, {:tool_call_name, delta}) do
+    emit(config, :tool_call_name, delta)
+  end
+
+  defp emit_stream_delta(config, {:tool_call_arguments_delta, delta}) do
+    emit(config, :tool_call_arguments_delta, delta)
   end
 
   # ---------------------------------------------------------------------------

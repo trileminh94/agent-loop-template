@@ -40,7 +40,13 @@ defmodule AgentLoop.LoopConfig do
           trace: boolean(),
           session_id: String.t() | nil,
           mcp_servers: [MCPServer.t()],
-          mcp_clients: %{String.t() => any()}
+          mcp_clients: %{String.t() => any()},
+          stream: boolean(),
+          max_retries: non_neg_integer(),
+          retry_backoff_ms: non_neg_integer(),
+          retry_on: (any() -> boolean()) | nil,
+          truncation_strategy: :drop_oldest | nil,
+          max_truncation_retries: non_neg_integer()
         }
 
   defstruct provider: nil,
@@ -59,7 +65,13 @@ defmodule AgentLoop.LoopConfig do
             trace: false,
             session_id: nil,
             mcp_servers: [],
-            mcp_clients: %{}
+            mcp_clients: %{},
+            stream: false,
+            max_retries: 0,
+            retry_backoff_ms: 1000,
+            retry_on: nil,
+            truncation_strategy: nil,
+            max_truncation_retries: 1
 
   @doc "Create a config with required fields."
   def new(provider, registry, opts \\ []) do
@@ -82,7 +94,13 @@ defmodule AgentLoop.LoopConfig do
       persistence: persistence,
       trace: trace,
       mcp_servers: Keyword.get(opts, :mcp_servers, []),
-      mcp_clients: Keyword.get(opts, :mcp_clients, %{})
+      mcp_clients: Keyword.get(opts, :mcp_clients, %{}),
+      stream: Keyword.get(opts, :stream, false),
+      max_retries: Keyword.get(opts, :max_retries, 0),
+      retry_backoff_ms: Keyword.get(opts, :retry_backoff_ms, 1000),
+      retry_on: Keyword.get(opts, :retry_on, nil),
+      truncation_strategy: Keyword.get(opts, :truncation_strategy, nil),
+      max_truncation_retries: Keyword.get(opts, :max_truncation_retries, 1)
     }
   end
 end

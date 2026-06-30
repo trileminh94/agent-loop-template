@@ -9,16 +9,19 @@ defmodule AgentLoop.ToolRegistry do
   - Executing tools and wrapping results
   """
 
+  alias AgentLoop.ToolCall
   alias AgentLoop.ToolDefinition
   alias AgentLoop.ToolResult
 
   @type t :: %__MODULE__{
           tools: %{String.t() => module()},
-          aliases: %{String.t() => String.t()}
+          aliases: %{String.t() => String.t()},
+          middleware: [module()]
         }
 
   defstruct tools: %{},
-            aliases: %{}
+            aliases: %{},
+            middleware: []
 
   @doc "Create an empty registry."
   def new, do: %__MODULE__{}
@@ -37,6 +40,12 @@ defmodule AgentLoop.ToolRegistry do
   @doc "Register multiple tool modules."
   def register_many(%__MODULE__{} = registry, tool_modules) when is_list(tool_modules) do
     Enum.reduce(tool_modules, registry, &register(&2, &1))
+  end
+
+  @doc "Register a middleware module."
+  def add_middleware(%__MODULE__{} = registry, middleware_module)
+      when is_atom(middleware_module) do
+    %{registry | middleware: registry.middleware ++ [middleware_module]}
   end
 
   @doc "Create an alias from one name to another canonical name."
@@ -80,32 +89,61 @@ defmodule AgentLoop.ToolRegistry do
         ToolResult.error(tool_call_id, name, "unknown tool: #{name}")
 
       {:ok, tool_module, canonical_name} ->
-        try do
-          result = run_tool(tool_module, canonical_name, args, context)
+        tool_call = %ToolCall{id: tool_call_id, name: canonical_name, arguments: args}
 
-          case result do
-            {:ok, content} ->
-              ToolResult.ok(tool_call_id, canonical_name, content)
+        case run_before_middleware(registry.middleware, tool_call, context) do
+          {:error, reason} ->
+            ToolResult.error(tool_call_id, canonical_name, reason)
 
-            {:error, reason} ->
-              ToolResult.error(tool_call_id, canonical_name, reason)
-          end
-        rescue
-          error ->
-            ToolResult.error(
-              tool_call_id,
-              canonical_name,
-              "tool #{canonical_name} crashed: #{Exception.message(error)}"
-            )
-        catch
-          kind, value ->
-            ToolResult.error(
-              tool_call_id,
-              canonical_name,
-              "tool #{canonical_name} threw: #{inspect({kind, value})}"
-            )
+          {:ok, %ToolCall{} = prepared_call} ->
+            result = execute_tool(tool_module, prepared_call, context)
+            run_after_middleware(registry.middleware, result, prepared_call, context)
         end
     end
+  end
+
+  defp execute_tool(tool_module, %ToolCall{} = tool_call, context) do
+    try do
+      result = run_tool(tool_module, tool_call.name, tool_call.arguments, context)
+
+      case result do
+        {:ok, content} ->
+          ToolResult.ok(tool_call.id, tool_call.name, content)
+
+        {:error, reason} ->
+          ToolResult.error(tool_call.id, tool_call.name, reason)
+      end
+    rescue
+      error ->
+        ToolResult.error(
+          tool_call.id,
+          tool_call.name,
+          "tool #{tool_call.name} crashed: #{Exception.message(error)}"
+        )
+    catch
+      kind, value ->
+        ToolResult.error(
+          tool_call.id,
+          tool_call.name,
+          "tool #{tool_call.name} threw: #{inspect({kind, value})}"
+        )
+    end
+  end
+
+  defp run_before_middleware(middleware, tool_call, context) do
+    Enum.reduce_while(middleware, {:ok, tool_call}, fn module, {:ok, call} ->
+      case module.before_execute(call, context) do
+        {:ok, %ToolCall{} = next_call} -> {:cont, {:ok, next_call}}
+        {:error, reason} -> {:halt, {:error, reason}}
+        other -> {:halt, {:error, "middleware #{module} returned invalid: #{inspect(other)}"}}
+      end
+    end)
+  end
+
+  defp run_after_middleware(middleware, result, tool_call, context) do
+    Enum.reduce(middleware, result, fn module, acc ->
+      module.after_execute(acc, tool_call, context)
+    end)
   end
 
   defp run_tool(AgentLoop.Tools.MCP, canonical_name, args, context) do

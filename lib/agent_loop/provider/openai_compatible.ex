@@ -54,6 +54,50 @@ defmodule AgentLoop.Provider.OpenAICompatible do
     end
   end
 
+  @impl true
+  def chat_stream(%__MODULE__{} = provider, %Schema.Request{} = request, callback)
+      when is_function(callback, 1) do
+    url = "#{provider.base_url}/chat/completions"
+
+    headers = [
+      {"authorization", "Bearer #{provider.api_key}"},
+      {"content-type", "application/json"}
+    ]
+
+    body = Map.put(to_openai_request(request), :stream, true)
+
+    acc = %{
+      buffer: "",
+      content: "",
+      tool_calls: %{},
+      finish_reason: nil
+    }
+
+    opts =
+      Keyword.merge(
+        [
+          json: body,
+          headers: headers,
+          into: fn {:data, data}, {req, resp} ->
+            acc = parse_stream_chunk(data, resp.body || acc, callback)
+            {:cont, {req, %{resp | body: acc}}}
+          end
+        ],
+        provider.http_options
+      )
+
+    case Req.post(url, opts) do
+      {:ok, %{status: status, body: acc}} when status in 200..299 ->
+        {:ok, build_stream_response(acc)}
+
+      {:ok, %{status: status, body: body}} ->
+        {:error, %{status: status, body: body}}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
   # ---------------------------------------------------------------------------
   # Provider adapter functions
   # ---------------------------------------------------------------------------
@@ -92,6 +136,154 @@ defmodule AgentLoop.Provider.OpenAICompatible do
        finish_reason: finish_reason,
        usage: usage
      }}
+  end
+
+  # ---------------------------------------------------------------------------
+  # Streaming
+  # ---------------------------------------------------------------------------
+
+  defp parse_stream_chunk(chunk, acc, callback) do
+    (acc.buffer <> chunk)
+    |> String.split("\n\n")
+    |> then(fn parts ->
+      {buffer, complete} = List.pop_at(parts, -1)
+
+      Enum.each(complete, fn event ->
+        process_sse_event(event, acc, callback)
+      end)
+
+      %{acc | buffer: buffer}
+    end)
+  end
+
+  defp process_sse_event(event, acc, callback) do
+    event
+    |> String.split("\n")
+    |> Enum.filter(&String.starts_with?(&1, "data: "))
+    |> Enum.map(&String.slice(&1, 6, String.length(&1)))
+    |> Enum.join("")
+    |> case do
+      "" ->
+        :ok
+
+      "[DONE]" ->
+        :ok
+
+      json ->
+        case Jason.decode(json) do
+          {:ok, data} -> handle_stream_data(data, acc, callback)
+          {:error, _} -> :ok
+        end
+    end
+  end
+
+  defp handle_stream_data(data, acc, callback) do
+    choice = List.first(data["choices"] || [])
+    delta = choice["delta"] || %{}
+
+    acc =
+      case delta["content"] do
+        nil ->
+          acc
+
+        content ->
+          callback.({:content_delta, content})
+          %{acc | content: acc.content <> content}
+      end
+
+    acc =
+      case delta["tool_calls"] do
+        nil -> acc
+        deltas -> accumulate_tool_call_deltas(deltas, acc, callback)
+      end
+
+    case choice["finish_reason"] do
+      nil -> acc
+      reason -> %{acc | finish_reason: reason}
+    end
+  end
+
+  defp accumulate_tool_call_deltas(deltas, acc, callback) do
+    Enum.reduce(deltas, acc, fn delta, acc ->
+      index = delta["index"] || 0
+
+      current =
+        Map.get(acc.tool_calls, index, %{
+          id: nil,
+          type: "function",
+          function: %{name: "", arguments: ""}
+        })
+
+      current =
+        if delta["id"] do
+          %{current | id: delta["id"]}
+        else
+          current
+        end
+
+      current =
+        if delta["type"] do
+          %{current | type: delta["type"]}
+        else
+          current
+        end
+
+      function = delta["function"] || %{}
+
+      current =
+        if function["name"] do
+          put_in(current.function.name, current.function.name <> function["name"])
+        else
+          current
+        end
+
+      current =
+        if function["arguments"] do
+          put_in(
+            current.function.arguments,
+            current.function.arguments <> function["arguments"]
+          )
+        else
+          current
+        end
+
+      if function["name"] do
+        callback.({:tool_call_name, %{index: index, name: current.function.name}})
+      end
+
+      if function["arguments"] do
+        callback.({:tool_call_arguments_delta, %{index: index, arguments: function["arguments"]}})
+      end
+
+      %{acc | tool_calls: Map.put(acc.tool_calls, index, current)}
+    end)
+  end
+
+  defp build_stream_response(acc) do
+    tool_calls =
+      acc.tool_calls
+      |> Enum.sort_by(fn {index, _} -> index end)
+      |> Enum.map(fn {_index, tc} ->
+        arguments =
+          case Jason.decode(tc.function.arguments) do
+            {:ok, args} -> args
+            {:error, _} -> %{}
+          end
+
+        %ToolCall{
+          id: tc.id,
+          name: tc.function.name,
+          arguments: arguments,
+          parse_error: nil
+        }
+      end)
+
+    %Schema.Response{
+      content: if(acc.content == "", do: nil, else: acc.content),
+      tool_calls: if(tool_calls == [], do: nil, else: tool_calls),
+      finish_reason: acc.finish_reason,
+      usage: nil
+    }
   end
 
   # ---------------------------------------------------------------------------

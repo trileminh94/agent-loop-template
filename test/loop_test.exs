@@ -3,6 +3,7 @@ defmodule AgentLoop.LoopTest do
 
   alias AgentLoop.Loop
   alias AgentLoop.LoopConfig
+  alias AgentLoop.Message
   alias AgentLoop.RunRequest
   alias AgentLoop.ToolCall
   alias AgentLoop.ToolRegistry
@@ -17,7 +18,8 @@ defmodule AgentLoop.LoopTest do
       max_iterations: Keyword.get(opts, :max_iterations, 10),
       max_tool_calls: Keyword.get(opts, :max_tool_calls, 50),
       system_prompt: Keyword.get(opts, :system_prompt, "You are a test assistant."),
-      event_callback: Keyword.get(opts, :event_callback)
+      event_callback: Keyword.get(opts, :event_callback),
+      stream: Keyword.get(opts, :stream, false)
     )
   end
 
@@ -127,6 +129,101 @@ defmodule AgentLoop.LoopTest do
     end
   end
 
+  describe "retries" do
+    test "retries transient provider failures up to max_retries" do
+      provider = %AgentLoop.Support.FlakyProvider{failures: 2, response: %{content: "ok"}}
+
+      config =
+        LoopConfig.new(provider, ToolRegistry.new(),
+          model: "mock",
+          max_retries: 3,
+          retry_backoff_ms: 0
+        )
+
+      request = RunRequest.new("hi")
+      result = Loop.run(request, config)
+
+      assert result.content == "ok"
+      assert result.finish_reason == :complete
+    end
+
+    test "gives up after max_retries" do
+      provider = %AgentLoop.Support.FlakyProvider{failures: 5, response: %{content: "ok"}}
+
+      config =
+        LoopConfig.new(provider, ToolRegistry.new(),
+          model: "mock",
+          max_retries: 2,
+          retry_backoff_ms: 0
+        )
+
+      request = RunRequest.new("hi")
+      result = Loop.run(request, config)
+
+      assert result.finish_reason == :error
+    end
+
+    test "respects retry_on predicate" do
+      provider = %AgentLoop.Support.FlakyProvider{failures: 2, response: %{content: "ok"}}
+
+      config =
+        LoopConfig.new(provider, ToolRegistry.new(),
+          model: "mock",
+          max_retries: 3,
+          retry_backoff_ms: 0,
+          retry_on: fn reason -> reason == :should_retry end
+        )
+
+      request = RunRequest.new("hi")
+      result = Loop.run(request, config)
+
+      assert result.finish_reason == :error
+    end
+  end
+
+  describe "truncation" do
+    test "drops oldest messages on context-length error and retries" do
+      provider = %AgentLoop.Support.ContextLengthProvider{response: %{content: "ok"}}
+
+      config =
+        LoopConfig.new(provider, ToolRegistry.new(),
+          model: "mock",
+          system_prompt: "You are helpful.",
+          truncation_strategy: :drop_oldest,
+          max_truncation_retries: 1,
+          max_iterations: 5
+        )
+
+      request =
+        RunRequest.new("hi", history: [Message.user("old"), Message.assistant("old reply")])
+
+      result = Loop.run(request, config)
+
+      assert result.content == "ok"
+      assert result.finish_reason == :complete
+    end
+
+    test "fails when truncation retries are exhausted" do
+      provider = %AgentLoop.Support.ContextLengthProvider{response: %{content: "ok"}}
+
+      config =
+        LoopConfig.new(provider, ToolRegistry.new(),
+          model: "mock",
+          system_prompt: "You are helpful.",
+          truncation_strategy: :drop_oldest,
+          max_truncation_retries: 0,
+          max_iterations: 5
+        )
+
+      request =
+        RunRequest.new("hi", history: [Message.user("old"), Message.assistant("old reply")])
+
+      result = Loop.run(request, config)
+
+      assert result.finish_reason == :error
+    end
+  end
+
   describe "events" do
     test "emits run lifecycle events" do
       provider = %MockProvider{responses: [%{content: "ok"}]}
@@ -166,6 +263,46 @@ defmodule AgentLoop.LoopTest do
 
       assert_received {:event, :tool_call, %{name: "echo"}}
       assert_received {:event, :tool_result, %{name: "echo"}}
+    end
+  end
+
+  describe "streaming" do
+    test "emits content deltas when stream is enabled" do
+      provider = %MockProvider{responses: [%{content: "hello"}]}
+
+      config =
+        build_config(provider,
+          stream: true,
+          event_callback: fn event ->
+            send(self(), {:event, event.type, event.payload})
+          end
+        )
+
+      request = RunRequest.new("hi")
+      result = Loop.run(request, config)
+
+      assert result.content == "hello"
+      assert_received {:event, :content_delta, %{content: "hello"}}
+      assert_received {:event, :run_completed, _}
+    end
+
+    test "falls back to chat when provider does not implement chat_stream" do
+      provider = %AgentLoop.Support.NonStreamingProvider{responses: [%{content: "ok"}]}
+
+      config =
+        LoopConfig.new(provider, ToolRegistry.new(),
+          model: "mock",
+          stream: true,
+          event_callback: fn event ->
+            send(self(), {:event, event.type, event.payload})
+          end
+        )
+
+      request = RunRequest.new("hi")
+      result = Loop.run(request, config)
+
+      assert result.content == "ok"
+      refute_received {:event, :content_delta, _}
     end
   end
 end
