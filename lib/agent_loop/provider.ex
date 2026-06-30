@@ -2,31 +2,15 @@ defmodule AgentLoop.Provider do
   @moduledoc """
   Behaviour for LLM providers.
 
-  Implementations translate the agent loop's request into provider-specific
-  HTTP calls and return a normalized response.
+  Implementations translate the agent loop's normalized `Schema.Request` into
+  provider-specific HTTP calls and return a normalized `Schema.Response`.
   """
 
-  alias AgentLoop.Message
-  alias AgentLoop.ToolDefinition
-  alias AgentLoop.ToolCall
+  alias AgentLoop.Provider.Schema
 
-  @type chat_request :: %{
-          required(:model) => String.t(),
-          required(:messages) => [Message.t()],
-          optional(:tools) => [ToolDefinition.t()],
-          optional(:temperature) => float(),
-          optional(:max_tokens) => pos_integer(),
-          optional(any()) => any()
-        }
+  @type chat_request :: Schema.Request.t()
 
-  @type chat_response :: %{
-          required(:content) => String.t() | nil,
-          optional(:thinking) => String.t() | nil,
-          optional(:tool_calls) => [ToolCall.t()],
-          optional(:finish_reason) => String.t(),
-          optional(:usage) => map(),
-          optional(any()) => any()
-        }
+  @type chat_response :: Schema.Response.t()
 
   @callback chat(provider :: any(), request :: chat_request()) ::
               {:ok, chat_response()} | {:error, any()}

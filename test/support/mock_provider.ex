@@ -8,12 +8,20 @@ defmodule AgentLoop.Support.MockProvider do
 
   @behaviour AgentLoop.Provider
 
+  alias AgentLoop.Provider.Schema
+
   defstruct responses: []
 
   @impl true
   def chat(%__MODULE__{responses: responses}, _request) do
     index = Process.get({__MODULE__, :index}, 0)
-    response = Enum.at(responses, index, %{content: "done"})
+
+    response =
+      case Enum.at(responses, index, %{content: "done"}) do
+        %Schema.Response{} = response -> response
+        map -> struct(Schema.Response, map)
+      end
+
     Process.put({__MODULE__, :index}, index + 1)
     {:ok, response}
   end

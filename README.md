@@ -157,16 +157,20 @@ registry = AgentLoop.ToolRegistry.new() |> AgentLoop.ToolRegistry.register(MyApp
 
 ## Adding a custom provider
 
-Implement the `AgentLoop.Provider` behaviour:
+Implement the `AgentLoop.Provider` behaviour. The loop passes a normalized
+`AgentLoop.Provider.Schema.Request` and expects an
+`AgentLoop.Provider.Schema.Response`:
 
 ```elixir
 defmodule MyApp.Providers.MyProvider do
   @behaviour AgentLoop.Provider
 
+  alias AgentLoop.Provider.Schema
+
   @impl true
-  def chat(provider, request) do
-    # request has :model, :messages, :tools, :temperature, :max_tokens
-    # return {:ok, %{content: "...", tool_calls: [...], usage: %{}}} |
+  def chat(provider, %Schema.Request{} = request) do
+    # Convert request to your provider's API format, call the API, then
+    # return {:ok, %Schema.Response{content: "...", tool_calls: [...]}} |
     #        {:error, reason}
   end
 end
@@ -377,6 +381,5 @@ mix format --check-formatted
 - Messaging channels (Telegram, Slack, etc.)
 - MCP bridge
 - Advanced policy engine
-- Schema normalization across providers
 
 Layer these on top when you need them.

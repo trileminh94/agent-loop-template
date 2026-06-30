@@ -14,6 +14,7 @@ defmodule AgentLoop.Loop do
   alias AgentLoop.MCP.Server, as: MCPServer
   alias AgentLoop.MCP.ToolBridge
   alias AgentLoop.Message
+  alias AgentLoop.Provider.Schema
   alias AgentLoop.RunRequest
   alias AgentLoop.RunResult
   alias AgentLoop.ToolCall
@@ -155,7 +156,7 @@ defmodule AgentLoop.Loop do
         deny: config.deny_tools
       )
 
-    request = %{
+    request = %Schema.Request{
       model: config.model,
       messages: state.messages,
       tools: tool_defs,
@@ -176,9 +177,9 @@ defmodule AgentLoop.Loop do
   # Response handling
   # ---------------------------------------------------------------------------
 
-  defp handle_response(state, config, %{tool_calls: tool_calls} = response)
+  defp handle_response(state, config, %Schema.Response{tool_calls: tool_calls} = response)
        when is_list(tool_calls) and length(tool_calls) > 0 do
-    assistant_msg = Message.assistant(Map.get(response, :content), tool_calls: tool_calls)
+    assistant_msg = Message.assistant(response.content, tool_calls: tool_calls)
     state = append_message(state, assistant_msg)
 
     state = %{state | total_tool_calls: state.total_tool_calls + length(tool_calls)}
@@ -197,15 +198,15 @@ defmodule AgentLoop.Loop do
     end
   end
 
-  defp handle_response(state, _config, %{content: content} = response) do
+  defp handle_response(state, _config, %Schema.Response{content: content} = response) do
     state = append_message(state, Message.assistant(content))
 
     finalize(
       %{
         state
         | final_content: content,
-          final_thinking: Map.get(response, :thinking),
-          usage: Map.get(response, :usage)
+          final_thinking: response.thinking,
+          usage: response.usage
       },
       nil
     )

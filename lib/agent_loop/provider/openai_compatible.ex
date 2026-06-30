@@ -17,6 +17,7 @@ defmodule AgentLoop.Provider.OpenAICompatible do
   @behaviour AgentLoop.Provider
 
   alias AgentLoop.Message
+  alias AgentLoop.Provider.Schema
   alias AgentLoop.ToolCall
 
   defstruct api_key: nil,
@@ -30,28 +31,20 @@ defmodule AgentLoop.Provider.OpenAICompatible do
         }
 
   @impl true
-  def chat(%__MODULE__{} = provider, request) do
+  def chat(%__MODULE__{} = provider, %Schema.Request{} = request) do
     url = "#{provider.base_url}/chat/completions"
-
-    body =
-      %{
-        model: request.model,
-        messages: Enum.map(request.messages, &to_openai_message/1),
-        temperature: request.temperature
-      }
-      |> maybe_put(:max_tokens, request.max_tokens)
-      |> maybe_put(:tools, format_tools(request[:tools]))
 
     headers = [
       {"authorization", "Bearer #{provider.api_key}"},
       {"content-type", "application/json"}
     ]
 
-    opts = Keyword.merge([json: body, headers: headers], provider.http_options)
+    opts =
+      Keyword.merge([json: to_openai_request(request), headers: headers], provider.http_options)
 
     case Req.post(url, opts) do
       {:ok, %{status: status, body: body}} when status in 200..299 ->
-        parse_response(body)
+        from_openai_response(body)
 
       {:ok, %{status: status, body: body}} ->
         {:error, %{status: status, body: body}}
@@ -59,6 +52,46 @@ defmodule AgentLoop.Provider.OpenAICompatible do
       {:error, reason} ->
         {:error, reason}
     end
+  end
+
+  # ---------------------------------------------------------------------------
+  # Provider adapter functions
+  # ---------------------------------------------------------------------------
+
+  @doc """
+  Convert a normalized `Schema.Request` into an OpenAI-compatible request body.
+  """
+  @spec to_openai_request(Schema.Request.t()) :: map()
+  def to_openai_request(%Schema.Request{} = request) do
+    %{
+      model: request.model,
+      messages: Enum.map(request.messages, &to_openai_message/1)
+    }
+    |> maybe_put(:temperature, request.temperature)
+    |> maybe_put(:max_tokens, request.max_tokens)
+    |> maybe_put(:tools, format_tools(request.tools))
+  end
+
+  @doc """
+  Parse an OpenAI-compatible response body into a normalized `Schema.Response`.
+  """
+  @spec from_openai_response(map()) :: {:ok, Schema.Response.t()} | {:error, any()}
+  def from_openai_response(body) when is_map(body) do
+    choice = List.first(body["choices"] || [])
+    message = choice["message"] || %{}
+
+    content = message["content"]
+    tool_calls = parse_tool_calls(message["tool_calls"])
+    finish_reason = choice["finish_reason"]
+    usage = body["usage"]
+
+    {:ok,
+     %Schema.Response{
+       content: content,
+       tool_calls: tool_calls,
+       finish_reason: finish_reason,
+       usage: usage
+     }}
   end
 
   # ---------------------------------------------------------------------------
@@ -111,24 +144,6 @@ defmodule AgentLoop.Provider.OpenAICompatible do
   # ---------------------------------------------------------------------------
   # Parsing
   # ---------------------------------------------------------------------------
-
-  defp parse_response(body) when is_map(body) do
-    choice = List.first(body["choices"] || [])
-    message = choice["message"] || %{}
-
-    content = message["content"]
-    tool_calls = parse_tool_calls(message["tool_calls"])
-    finish_reason = choice["finish_reason"]
-    usage = body["usage"]
-
-    {:ok,
-     %{
-       content: content,
-       tool_calls: tool_calls,
-       finish_reason: finish_reason,
-       usage: usage
-     }}
-  end
 
   defp parse_tool_calls(nil), do: nil
   defp parse_tool_calls([]), do: []
