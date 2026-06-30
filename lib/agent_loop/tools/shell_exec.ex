@@ -39,12 +39,14 @@ defmodule AgentLoop.Tools.ShellExec do
       "properties" => %{
         "command" => %{
           "type" => "string",
-          "description" => "Command to run. No shell metacharacters are interpreted."
+          "description" =>
+            "Command to run. Can be a full string (e.g. 'mkdir -p dir') when args is omitted, or just the executable name when args is provided."
         },
         "args" => %{
           "type" => "array",
           "items" => %{"type" => "string"},
-          "description" => "Arguments for the command"
+          "description" =>
+            "Arguments for the command. Omit if the command already contains arguments."
         },
         "timeout" => %{
           "type" => "integer",
@@ -69,9 +71,11 @@ defmodule AgentLoop.Tools.ShellExec do
         {:error, "command '#{command}' is not allowed"}
 
       true ->
+        {executable, argv} = parse_command(command, cmd_args)
+
         case Workspace.resolve(".") do
           {:ok, cwd} ->
-            run(command, cmd_args, cwd, timeout)
+            run(executable, argv, cwd, timeout)
 
           {:error, reason} ->
             {:error, reason}
@@ -79,17 +83,30 @@ defmodule AgentLoop.Tools.ShellExec do
     end
   end
 
+  defp parse_command(command, args) when is_list(args) and length(args) > 0 do
+    {command, args}
+  end
+
+  defp parse_command(command, _args) do
+    parts = String.split(command)
+
+    case parts do
+      [exe | argv] -> {exe, argv}
+      [] -> {command, []}
+    end
+  end
+
   defp denied?(command) do
     Enum.any?(@deny_patterns, &Regex.match?(&1, command))
   end
 
-  defp run(command, args, cwd, timeout) do
-    executable = System.find_executable(command)
+  defp run(executable, args, cwd, timeout) do
+    found = System.find_executable(executable)
 
-    if is_nil(executable) do
-      {:error, "command not found: #{command}"}
+    if is_nil(found) do
+      {:error, "command not found: #{executable}"}
     else
-      task = Task.async(fn -> System.cmd(executable, args, cd: cwd, stderr_to_stdout: true) end)
+      task = Task.async(fn -> System.cmd(found, args, cd: cwd, stderr_to_stdout: true) end)
 
       try do
         case Task.await(task, timeout) do

@@ -137,6 +137,18 @@ defmodule AgentLoop.Tools.WorkspaceToolsTest do
       assert {:error, "command 'rm -rf /' is not allowed"} =
                ShellExec.execute(%{"command" => "rm -rf /"})
     end
+
+    test "splits command string into executable and args when args is empty", %{tmp: tmp} do
+      File.write!(Path.join(tmp, "a.txt"), "hello")
+      assert {:ok, output} = ShellExec.execute(%{"command" => "ls -la"})
+      assert output =~ "a.txt"
+    end
+
+    test "uses explicit args when provided", %{tmp: tmp} do
+      File.write!(Path.join(tmp, "b.txt"), "hello")
+      assert {:ok, output} = ShellExec.execute(%{"command" => "ls", "args" => ["-la"]})
+      assert output =~ "b.txt"
+    end
   end
 
   describe "Memory" do
