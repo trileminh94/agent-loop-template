@@ -28,7 +28,7 @@ defmodule AgentLoop.ToolResult do
     %__MODULE__{
       tool_call_id: tool_call_id,
       name: name,
-      content: to_string(content),
+      content: sanitize(content),
       is_error: false
     }
   end
@@ -38,8 +38,8 @@ defmodule AgentLoop.ToolResult do
     %__MODULE__{
       tool_call_id: tool_call_id,
       name: name,
-      content: to_string(content),
-      user_content: user_content,
+      content: sanitize(content),
+      user_content: sanitize(user_content),
       is_error: false
     }
   end
@@ -49,9 +49,13 @@ defmodule AgentLoop.ToolResult do
     %__MODULE__{
       tool_call_id: tool_call_id,
       name: name,
-      content: "Error: #{reason}",
+      content: sanitize("Error: #{reason}"),
       is_error: true
     }
+  end
+
+  defp sanitize(value) do
+    value |> to_string() |> String.replace_invalid("�")
   end
 
   @doc "Return the content intended for the LLM."

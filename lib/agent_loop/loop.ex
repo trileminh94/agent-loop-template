@@ -496,8 +496,11 @@ defmodule AgentLoop.Loop do
 
   defp truncate(nil, _max), do: ""
 
-  defp truncate(str, max) when is_binary(str) and byte_size(str) > max,
-    do: String.slice(str, 0, max) <> "..."
+  defp truncate(str, max) when is_binary(str) and byte_size(str) > max do
+    str |> String.slice(0, max) |> String.replace_invalid("�") |> Kernel.<>("...")
+  end
 
-  defp truncate(str, _max), do: to_string(str)
+  defp truncate(str, _max) do
+    str |> to_string() |> String.replace_invalid("�")
+  end
 end
