@@ -19,10 +19,16 @@ defmodule KimiCodeClone.Tools.ShellExec do
 
   @impl true
   def execute(args, context) do
-    if Approval.prompt(name(), args) do
-      BaseTool.execute(args, context)
+    command = Map.get(args, "command", "")
+
+    if BaseTool.dangerous?(command) do
+      if Approval.prompt(name(), args) do
+        BaseTool.execute_approved(args, context)
+      else
+        {:error, "user denied shell_exec"}
+      end
     else
-      {:error, "user denied shell_exec"}
+      BaseTool.execute(args, context)
     end
   end
 end

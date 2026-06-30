@@ -58,10 +58,8 @@ defmodule AgentLoop.Tools.ShellExec do
   end
 
   @impl true
-  def execute(args, _context) do
+  def execute(args, context) do
     command = Map.get(args, "command")
-    cmd_args = Map.get(args, "args", [])
-    timeout = Map.get(args, "timeout", @default_timeout_ms)
 
     cond do
       is_nil(command) or command == "" ->
@@ -71,16 +69,35 @@ defmodule AgentLoop.Tools.ShellExec do
         {:error, "command '#{command}' is not allowed"}
 
       true ->
-        {executable, argv} = parse_command(command, cmd_args)
-
-        case Workspace.resolve(".") do
-          {:ok, cwd} ->
-            run(executable, argv, cwd, timeout)
-
-          {:error, reason} ->
-            {:error, reason}
-        end
+        execute_approved(args, context)
     end
+  end
+
+  @doc """
+  Execute a command without the deny-list check.
+
+  Use this when an interactive approval layer (e.g. KimiCodeClone) has already
+  asked the user and wants to run the command anyway.
+  """
+  def execute_approved(args, _context) do
+    command = Map.get(args, "command")
+    cmd_args = Map.get(args, "args", [])
+    timeout = Map.get(args, "timeout", @default_timeout_ms)
+
+    {executable, argv} = parse_command(command, cmd_args)
+
+    case Workspace.resolve(".") do
+      {:ok, cwd} ->
+        run(executable, argv, cwd, timeout)
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  @doc "Return true if the command matches the deny list."
+  def dangerous?(command) when is_binary(command) do
+    denied?(command)
   end
 
   defp parse_command(command, args) when is_list(args) and length(args) > 0 do
