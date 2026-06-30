@@ -51,6 +51,32 @@ defmodule AgentLoop.StructuredOutputTest do
     end
   end
 
+  describe "parse_yaml/2" do
+    defmodule FakeYaml do
+      def decode!("answer: 42"), do: %{"answer" => 42}
+      def decode!(content), do: raise("unexpected: #{content}")
+    end
+
+    test "parses YAML with a configured parser" do
+      assert {:ok, %{"answer" => 42}} =
+               StructuredOutput.parse_yaml("answer: 42\n", yaml_parser: FakeYaml)
+    end
+
+    test "returns error when no parser is configured" do
+      assert {:error, :yaml_parser_not_configured} =
+               StructuredOutput.parse_yaml("answer: 42\n", [])
+    end
+
+    test "validates parsed YAML" do
+      validator = fn data ->
+        if data["answer"] == 42, do: {:ok, data}, else: {:error, :wrong}
+      end
+
+      assert {:ok, %{"answer" => 42}} =
+               StructuredOutput.parse_yaml("answer: 42\n", validator, yaml_parser: FakeYaml)
+    end
+  end
+
   describe "validate/2" do
     test "uses custom validator function" do
       validator = fn data ->
