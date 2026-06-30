@@ -47,7 +47,8 @@ defmodule AgentLoop.LoopConfig do
           retry_on: (any() -> boolean()) | nil,
           truncation_strategy: :drop_oldest | nil,
           max_truncation_retries: non_neg_integer(),
-          tool_timeout_ms: pos_integer() | :infinity
+          tool_timeout_ms: pos_integer() | :infinity,
+          approval: module() | nil
         }
 
   defstruct provider: nil,
@@ -73,7 +74,8 @@ defmodule AgentLoop.LoopConfig do
             retry_on: nil,
             truncation_strategy: nil,
             max_truncation_retries: 1,
-            tool_timeout_ms: 60_000
+            tool_timeout_ms: 60_000,
+            approval: nil
 
   @doc "Create a config with required fields."
   def new(provider, registry, opts \\ []) do
@@ -103,7 +105,8 @@ defmodule AgentLoop.LoopConfig do
       retry_on: Keyword.get(opts, :retry_on, nil),
       truncation_strategy: Keyword.get(opts, :truncation_strategy, nil),
       max_truncation_retries: Keyword.get(opts, :max_truncation_retries, 1),
-      tool_timeout_ms: Keyword.get(opts, :tool_timeout_ms, 60_000)
+      tool_timeout_ms: Keyword.get(opts, :tool_timeout_ms, 60_000),
+      approval: Keyword.get(opts, :approval, nil)
     }
   end
 end

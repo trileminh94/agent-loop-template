@@ -19,6 +19,7 @@ defmodule AgentLoop.Loop do
   alias AgentLoop.RunResult
   alias AgentLoop.ToolCall
   alias AgentLoop.ToolRegistry
+  alias AgentLoop.ToolResult
   alias AgentLoop.Tools.Context
   alias AgentLoop.Tools.MCP, as: MCPTool
 
@@ -307,24 +308,49 @@ defmodule AgentLoop.Loop do
 
   defp execute_tool_calls(state, config, [tool_call]) do
     # Single tool: no Task overhead.
-    result = execute_single_tool(config, tool_call)
+    emit(config, :tool_call, %{
+      id: tool_call.id,
+      name: tool_call.name,
+      arguments: tool_call.arguments
+    })
+
+    result = execute_approved_tool(config, tool_call)
     state = emit_tool_result(state, config, result)
     append_message(state, build_tool_message(result))
   end
 
   defp execute_tool_calls(state, config, tool_calls) do
-    # Multiple tools: execute in parallel with bounded concurrency.
+    # Multiple tools: approve sequentially (so prompts don't interleave), then
+    # execute the approved calls in parallel.
     emit(config, :tool_calls, %{count: length(tool_calls), names: Enum.map(tool_calls, & &1.name)})
 
-    results =
-      tool_calls
+    Enum.each(tool_calls, fn tc ->
+      emit(config, :tool_call, %{id: tc.id, name: tc.name, arguments: tc.arguments})
+    end)
+
+    base_context = build_context(config)
+
+    calls =
+      Enum.map(tool_calls, fn tc ->
+        case maybe_approve(config.approval, tc, base_context) do
+          {:ok, context} -> {:run, tc, context}
+          {:error, reason} -> {:error, ToolResult.error(tc.id, tc.name, reason)}
+        end
+      end)
+
+    {to_run, _denied} = Enum.split_with(calls, &match?({:run, _, _}, &1))
+
+    run_results =
+      to_run
       |> Task.async_stream(
-        fn tc -> execute_single_tool(config, tc) end,
+        fn {:run, tc, context} -> run_approved_tool(config, tc, context) end,
         ordered: true,
         max_concurrency: length(tool_calls),
         timeout: config.tool_timeout_ms
       )
       |> Enum.map(fn {:ok, result} -> result end)
+
+    results = reconstruct_results(calls, run_results, [])
 
     Enum.reduce(results, state, fn result, acc ->
       acc = emit_tool_result(acc, config, result)
@@ -332,17 +358,25 @@ defmodule AgentLoop.Loop do
     end)
   end
 
-  defp execute_single_tool(config, %ToolCall{id: id, name: name, arguments: args}) do
-    emit(config, :tool_call, %{id: id, name: name, arguments: args})
+  defp reconstruct_results([], [], acc), do: Enum.reverse(acc)
 
+  defp reconstruct_results([{:run, _, _} | calls], [result | run_results], acc) do
+    reconstruct_results(calls, run_results, [result | acc])
+  end
+
+  defp reconstruct_results([{:error, result} | calls], run_results, acc) do
+    reconstruct_results(calls, run_results, [result | acc])
+  end
+
+  defp execute_approved_tool(config, tool_call) do
+    case maybe_approve(config.approval, tool_call, build_context(config)) do
+      {:ok, context} -> run_approved_tool(config, tool_call, context)
+      {:error, reason} -> ToolResult.error(tool_call.id, tool_call.name, reason)
+    end
+  end
+
+  defp run_approved_tool(config, %ToolCall{id: id, name: name, arguments: args}, context) do
     resolved_name = ToolRegistry.strip_prefix(name, config.tool_call_prefix)
-
-    context = %Context{
-      session_id: config.session_id,
-      persistence: config.persistence,
-      mcp_clients: config.mcp_clients
-    }
-
     result = ToolRegistry.execute(config.registry, id, resolved_name, args, context)
 
     emit(config, :tool_result, %{
@@ -355,6 +389,27 @@ defmodule AgentLoop.Loop do
     })
 
     result
+  end
+
+  defp build_context(config) do
+    %Context{
+      session_id: config.session_id,
+      persistence: config.persistence,
+      mcp_clients: config.mcp_clients
+    }
+  end
+
+  defp maybe_approve(nil, _tool_call, context), do: {:ok, context}
+
+  defp maybe_approve(approval, tool_call, context) do
+    if approval.requires_approval?(tool_call, context) do
+      case approval.approve(tool_call, context) do
+        :ok -> {:ok, %{context | approved: true}}
+        {:error, reason} -> {:error, reason}
+      end
+    else
+      {:ok, context}
+    end
   end
 
   defp build_tool_message(%{tool_call_id: id, content: content, is_error: is_error}) do

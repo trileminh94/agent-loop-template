@@ -12,10 +12,12 @@ defmodule AgentLoop.Tools.Context do
   @type t :: %__MODULE__{
           session_id: String.t() | nil,
           persistence: Persistence.t() | nil,
-          mcp_clients: %{String.t() => AgentLoop.MCP.Client.t()}
+          mcp_clients: %{String.t() => AgentLoop.MCP.Client.t()},
+          approved: boolean()
         }
 
   defstruct session_id: nil,
             persistence: nil,
-            mcp_clients: %{}
+            mcp_clients: %{},
+            approved: false
 end

@@ -8,11 +8,11 @@ defmodule KimiCodeClone.Session do
 
   use GenServer
 
+  alias AgentLoop.Approval.Terminal, as: TerminalApproval
   alias AgentLoop.LoopConfig
   alias AgentLoop.Persistence
   alias AgentLoop.Tools.Workspace
 
-  alias KimiCodeClone.Approval
   alias KimiCodeClone.Prompts
   alias KimiCodeClone.Tools.Registry, as: ToolRegistryBuilder
 
@@ -55,6 +55,7 @@ defmodule KimiCodeClone.Session do
         persistence: persistence,
         trace: true,
         max_iterations: 20,
+        approval: TerminalApproval,
         event_callback: &handle_event/1
       )
 
@@ -90,14 +91,7 @@ defmodule KimiCodeClone.Session do
   end
 
   defp handle_event(%{type: :tool_call, payload: %{name: name}}) do
-    if Approval.requires_approval?(name) do
-      # Approval prompt is blocking. The agent loop is waiting for this
-      # callback to return, but the tool itself will be executed after the
-      # user confirms inside the tool wrapper.
-      :ok
-    else
-      IO.puts("[tool: #{name}]")
-    end
+    IO.puts("[tool: #{name}]")
   end
 
   defp handle_event(%{type: :tool_result, payload: %{name: name, is_error: true, content: content}}) do

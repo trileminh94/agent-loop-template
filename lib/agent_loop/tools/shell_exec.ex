@@ -58,6 +58,10 @@ defmodule AgentLoop.Tools.ShellExec do
   end
 
   @impl true
+  def execute(args, %{approved: true} = context) do
+    execute_approved(args, context)
+  end
+
   def execute(args, context) do
     command = Map.get(args, "command")
 
