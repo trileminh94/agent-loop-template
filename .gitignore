@@ -15,3 +15,4 @@ examples/**/_build/
 examples/**/deps/
 examples/**/.kimi_code_clone/*.db
 examples/**/mix.lock
+examples/kimi_code_clone/temp/
