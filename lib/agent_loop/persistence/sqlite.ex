@@ -19,6 +19,7 @@ defmodule AgentLoop.Persistence.SQLite do
 
   alias AgentLoop.Message
   alias AgentLoop.Persistence.Migrations.Initial
+  alias AgentLoop.ToolCall
   alias Exqlite.Basic, as: Sqlite
 
   @default_database ".agent_loop/sessions.db"
@@ -263,17 +264,29 @@ defmodule AgentLoop.Persistence.SQLite do
     %Message{
       role: String.to_existing_atom(role),
       content: content,
-      tool_calls: decode(tool_calls_json),
+      tool_calls: decode_tool_calls(tool_calls_json),
       tool_call_id: tool_call_id,
       name: name
     }
   end
 
+  defp decode_tool_calls(nil), do: nil
+
+  defp decode_tool_calls(json) do
+    json
+    |> Jason.decode!()
+    |> Enum.map(fn map ->
+      %ToolCall{
+        id: map["id"],
+        name: map["name"],
+        arguments: map["arguments"],
+        parse_error: map["parse_error"]
+      }
+    end)
+  end
+
   defp encode(nil), do: nil
   defp encode(value), do: Jason.encode!(value)
-
-  defp decode(nil), do: nil
-  defp decode(json), do: Jason.decode!(json)
 
   defp now_iso, do: DateTime.utc_now() |> DateTime.to_iso8601()
 end

@@ -4,6 +4,7 @@ defmodule AgentLoop.Persistence.SQLiteTest do
   alias AgentLoop.Message
   alias AgentLoop.Persistence
   alias AgentLoop.Persistence.SQLite
+  alias AgentLoop.ToolCall
 
   setup do
     tmp = Path.join(System.tmp_dir!(), "agent_loop_sqlite_#{System.unique_integer([:positive])}")
@@ -63,5 +64,28 @@ defmodule AgentLoop.Persistence.SQLiteTest do
     assert {:ok, traces} = adapter.get_trace(state, "session-1", "run-1")
     assert length(traces) == 2
     assert Enum.at(traces, 1).type == :tool_call
+  end
+
+  test "round-trips messages with tool_calls", %{persistence: {adapter, state}} do
+    messages = [
+      Message.user("call a tool"),
+      Message.assistant(nil,
+        tool_calls: [
+          %ToolCall{id: "call-1", name: "list_files", arguments: %{"path" => "."}}
+        ]
+      ),
+      Message.tool("call-1", "a.txt\nb.txt")
+    ]
+
+    assert :ok = adapter.save_session(state, "session-tools", messages, %{})
+
+    assert {:ok, %{messages: loaded}} = adapter.load_session(state, "session-tools")
+
+    assert length(loaded) == 3
+
+    assert [%ToolCall{} = tc] = Enum.at(loaded, 1).tool_calls
+    assert tc.id == "call-1"
+    assert tc.name == "list_files"
+    assert tc.arguments == %{"path" => "."}
   end
 end

@@ -8,6 +8,7 @@ defmodule AgentLoop.Persistence.NoOp do
   @behaviour AgentLoop.Persistence
 
   alias AgentLoop.Message
+  alias AgentLoop.ToolCall
 
   @impl true
   def init(_opts), do: {:ok, nil}
@@ -52,10 +53,27 @@ defmodule AgentLoop.Persistence.NoOp do
       %Message{
         role: String.to_existing_atom(map["role"]),
         content: map["content"],
-        tool_calls: map["tool_calls"],
+        tool_calls: decode_tool_calls(map["tool_calls"]),
         tool_call_id: map["tool_call_id"],
         name: map["name"]
       }
+    end)
+  end
+
+  defp decode_tool_calls(nil), do: nil
+
+  defp decode_tool_calls(list) when is_list(list) do
+    Enum.map(list, fn
+      %ToolCall{} = tc ->
+        tc
+
+      map ->
+        %ToolCall{
+          id: map["id"],
+          name: map["name"],
+          arguments: map["arguments"],
+          parse_error: map["parse_error"]
+        }
     end)
   end
 end
