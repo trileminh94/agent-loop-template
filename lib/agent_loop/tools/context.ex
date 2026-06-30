@@ -13,11 +13,13 @@ defmodule AgentLoop.Tools.Context do
           session_id: String.t() | nil,
           persistence: Persistence.t() | nil,
           mcp_clients: %{String.t() => AgentLoop.MCP.Client.t()},
-          approved: boolean()
+          approved: boolean(),
+          history: [AgentLoop.Message.t()]
         }
 
   defstruct session_id: nil,
             persistence: nil,
             mcp_clients: %{},
-            approved: false
+            approved: false,
+            history: []
 end

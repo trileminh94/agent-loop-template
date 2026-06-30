@@ -48,7 +48,24 @@ defmodule AgentLoop.Tools.WorkspaceToolsTest do
 
       assert {:ok, listing} = ListFiles.execute(%{"path" => tmp}, %Context{})
       assert listing =~ "[FILE] a.txt"
-      assert listing =~ "[DIR]  sub/"
+      assert listing =~ "[DIR] sub/"
+    end
+
+    test "recursive listing includes nested files", %{tmp: tmp} do
+      File.mkdir_p!(Path.join(tmp, "sub"))
+      File.write!(Path.join(tmp, "sub/nested.txt"), "x")
+
+      assert {:ok, listing} = ListFiles.execute(%{"path" => tmp, "recursive" => true}, %Context{})
+      assert listing =~ "[FILE] sub/nested.txt"
+    end
+
+    test "details include size and binary marker", %{tmp: tmp} do
+      File.write!(Path.join(tmp, "text.txt"), "hello")
+      File.write!(Path.join(tmp, "big.bin"), String.duplicate("x", 60_000))
+
+      assert {:ok, listing} = ListFiles.execute(%{"path" => tmp, "details" => true}, %Context{})
+      assert listing =~ "[FILE] text.txt 5b [text]"
+      assert listing =~ "[FILE] big.bin 60000b [large]"
     end
   end
 

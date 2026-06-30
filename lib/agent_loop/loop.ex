@@ -314,7 +314,7 @@ defmodule AgentLoop.Loop do
       arguments: tool_call.arguments
     })
 
-    result = execute_approved_tool(config, tool_call)
+    result = execute_approved_tool(config, tool_call, state.messages)
     state = emit_tool_result(state, config, result)
     append_message(state, build_tool_message(result))
   end
@@ -328,7 +328,7 @@ defmodule AgentLoop.Loop do
       emit(config, :tool_call, %{id: tc.id, name: tc.name, arguments: tc.arguments})
     end)
 
-    base_context = build_context(config)
+    base_context = build_context(config, state.messages)
 
     calls =
       Enum.map(tool_calls, fn tc ->
@@ -368,8 +368,8 @@ defmodule AgentLoop.Loop do
     reconstruct_results(calls, run_results, [result | acc])
   end
 
-  defp execute_approved_tool(config, tool_call) do
-    case maybe_approve(config.approval, tool_call, build_context(config)) do
+  defp execute_approved_tool(config, tool_call, messages) do
+    case maybe_approve(config.approval, tool_call, build_context(config, messages)) do
       {:ok, context} -> run_approved_tool(config, tool_call, context)
       {:error, reason} -> ToolResult.error(tool_call.id, tool_call.name, reason)
     end
@@ -391,11 +391,12 @@ defmodule AgentLoop.Loop do
     result
   end
 
-  defp build_context(config) do
+  defp build_context(config, messages) do
     %Context{
       session_id: config.session_id,
       persistence: config.persistence,
-      mcp_clients: config.mcp_clients
+      mcp_clients: config.mcp_clients,
+      history: messages
     }
   end
 

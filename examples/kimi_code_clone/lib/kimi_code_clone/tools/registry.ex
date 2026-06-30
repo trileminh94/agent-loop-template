@@ -12,6 +12,7 @@ defmodule KimiCodeClone.Tools.Registry do
     ListFiles,
     Memory,
     ReadFile,
+    ReadFiles,
     ShellExec,
     WriteFile
   }
@@ -20,6 +21,7 @@ defmodule KimiCodeClone.Tools.Registry do
     ToolRegistry.new()
     |> ToolRegistry.register_many([
       ReadFile,
+      ReadFiles,
       ListFiles,
       WriteFile,
       EditFile,
