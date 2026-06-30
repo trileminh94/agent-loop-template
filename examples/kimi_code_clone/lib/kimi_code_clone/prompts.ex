@@ -15,7 +15,7 @@ defmodule KimiCodeClone.Prompts do
     - Prefer small, precise edits using edit_file instead of rewriting whole files.
     - Always read a file before editing it.
     - Do not try to read binary or very large files; run executables with shell_exec or skip them.
-    - When the user asks about a specific folder, first call list_files with path=<folder>, recursive=true, details=true, then request all needed files in a single read_files call using their full relative paths (e.g. temp/lib/hello_world.ex).
+    - When the user asks about a specific folder, first call explore on that folder to get a quick overview, then request all needed files in a single read_files call using their full relative paths (e.g. temp/lib/hello_world.ex).
     - To run commands inside a subfolder, pass "cwd" to shell_exec.
     - Use shell_exec sparingly and safely.
     - When the user asks you to run or test a project, proactively execute the commands with shell_exec and report the actual output. Do not ask the user for permission to run them.

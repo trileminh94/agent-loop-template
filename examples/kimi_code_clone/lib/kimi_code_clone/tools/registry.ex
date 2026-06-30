@@ -7,6 +7,7 @@ defmodule KimiCodeClone.Tools.Registry do
 
   alias AgentLoop.Tools.{
     EditFile,
+    Explore,
     FetchURL,
     Grep,
     ListFiles,
@@ -23,6 +24,7 @@ defmodule KimiCodeClone.Tools.Registry do
       ReadFile,
       ReadFiles,
       ListFiles,
+      Explore,
       WriteFile,
       EditFile,
       Grep,
