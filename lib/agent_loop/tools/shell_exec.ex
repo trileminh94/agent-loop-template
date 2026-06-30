@@ -51,6 +51,11 @@ defmodule AgentLoop.Tools.ShellExec do
         "timeout" => %{
           "type" => "integer",
           "description" => "Timeout in milliseconds (default: #{@default_timeout_ms})"
+        },
+        "cwd" => %{
+          "type" => "string",
+          "description" =>
+            "Working directory relative to the workspace root. Defaults to the workspace root."
         }
       },
       "required" => ["command"]
@@ -87,10 +92,11 @@ defmodule AgentLoop.Tools.ShellExec do
     command = Map.get(args, "command")
     cmd_args = Map.get(args, "args", [])
     timeout = Map.get(args, "timeout", @default_timeout_ms)
+    cwd_arg = Map.get(args, "cwd", ".")
 
     {executable, argv} = parse_command(command, cmd_args)
 
-    case Workspace.resolve(".") do
+    case Workspace.resolve(cwd_arg) do
       {:ok, cwd} ->
         run(executable, argv, cwd, timeout)
 
@@ -105,7 +111,12 @@ defmodule AgentLoop.Tools.ShellExec do
   end
 
   defp parse_command(command, args) when is_list(args) and length(args) > 0 do
-    {command, args}
+    parts = String.split(command)
+
+    case parts do
+      [exe | argv] -> {exe, argv ++ args}
+      [] -> {command, args}
+    end
   end
 
   defp parse_command(command, _args) do

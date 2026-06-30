@@ -13,6 +13,7 @@ defmodule KimiCodeClone.Session do
   alias AgentLoop.Persistence
   alias AgentLoop.Tools.Workspace
 
+  alias KimiCodeClone.Approval.Auto, as: AutoApproval
   alias KimiCodeClone.Prompts
   alias KimiCodeClone.Tools.Registry, as: ToolRegistryBuilder
 
@@ -48,6 +49,13 @@ defmodule KimiCodeClone.Session do
         database: Path.join(workspace, ".kimi_code_clone/sessions.db")
       )
 
+    approval =
+      if System.get_env("KIMI_AUTO_APPROVE") == "1" do
+        AutoApproval
+      else
+        TerminalApproval
+      end
+
     config =
       LoopConfig.new(provider, registry,
         model: model,
@@ -55,9 +63,11 @@ defmodule KimiCodeClone.Session do
         persistence: persistence,
         trace: true,
         max_iterations: 20,
-        approval: TerminalApproval,
+        approval: approval,
         event_callback: &handle_event/1
       )
+
+    Application.put_env(:kimi_code_clone, :workspace, workspace)
 
     {:ok, %__MODULE__{config: config, workspace: workspace}}
   end

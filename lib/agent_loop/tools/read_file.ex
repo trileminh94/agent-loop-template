@@ -10,6 +10,8 @@ defmodule AgentLoop.Tools.ReadFile do
 
   alias AgentLoop.Tools.Workspace
 
+  @max_bytes 50_000
+
   @impl true
   def name, do: "read_file"
 
@@ -51,14 +53,24 @@ defmodule AgentLoop.Tools.ReadFile do
     else
       case Workspace.resolve(path) do
         {:ok, resolved} ->
-          case File.read(resolved) do
-            {:ok, content} ->
-              content
-              |> slice_lines(offset, limit)
-              |> then(&{:ok, &1})
+          case File.stat(resolved) do
+            {:ok, %{size: size}} when size > @max_bytes ->
+              {:error,
+               "#{path} is #{size} bytes (max #{@max_bytes}); use offset/limit or read a smaller file"}
+
+            {:ok, _} ->
+              case File.read(resolved) do
+                {:ok, content} ->
+                  content
+                  |> slice_lines(offset, limit)
+                  |> then(&{:ok, &1})
+
+                {:error, reason} ->
+                  {:error, "could not read #{path}: #{:file.format_error(reason)}"}
+              end
 
             {:error, reason} ->
-              {:error, "could not read #{path}: #{:file.format_error(reason)}"}
+              {:error, "could not stat #{path}: #{:file.format_error(reason)}"}
           end
 
         {:error, reason} ->
